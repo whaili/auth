@@ -32,10 +32,10 @@ func (s *TokenServiceImpl) CreateToken(ctx context.Context, accountID string, re
 		return nil, err
 	}
 
-	// 2. 计算过期时间
+	// 2. 计算过期时间（秒级精度）
 	var expiresAt time.Time
-	if req.ExpiresInDays > 0 {
-		expiresAt = time.Now().AddDate(0, 0, req.ExpiresInDays)
+	if req.ExpiresInSeconds > 0 {
+		expiresAt = time.Now().Add(time.Duration(req.ExpiresInSeconds) * time.Second)
 	}
 
 	// 3. 创建 Token 对象

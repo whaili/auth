@@ -107,10 +107,44 @@ main() {
     test_step "11. Delete Token"
     test_delete_token
 
+    # ========================================
+    # Qstub 认证测试
+    # ========================================
+
+    # 12. Qstub 认证 - 创建账户
+    test_step "12. Qstub Authentication - Create Account"
+    test_qstub_create_account
+
+    # 13. Qstub 认证 - 创建 Token
+    test_step "13. Qstub Authentication - Create Token"
+    test_qstub_create_token
+
+    # 14. Qstub 认证 - 列出 Tokens
+    test_step "14. Qstub Authentication - List Tokens"
+    test_qstub_list_tokens
+
+    # 15. Qstub 认证 - 获取 Token 详情
+    test_step "15. Qstub Authentication - Get Token Info"
+    test_qstub_get_token
+
+    # 16. 验证 Account ID 映射（在删除前验证）
+    test_step "16. Verify Qstub Account ID Mapping"
+    test_qstub_account_mapping
+
+    # 17. Qstub 认证 - 更新 Token
+    test_step "17. Qstub Authentication - Update Token Status"
+    test_qstub_update_token
+
+    # 18. Qstub 认证 - 删除 Token
+    test_step "18. Qstub Authentication - Delete Token"
+    test_qstub_delete_token
+
     # 测试总结
     echo ""
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}🎉 All Tests Passed!${NC}"
+    echo -e "${GREEN}  - HMAC Authentication ✓${NC}"
+    echo -e "${GREEN}  - Qstub Authentication ✓${NC}"
     echo -e "${GREEN}========================================${NC}"
 }
 
@@ -407,6 +441,205 @@ test_delete_token() {
         log_success "Token deleted successfully"
     else
         log_error "Failed to delete token"
+        exit 1
+    fi
+}
+
+# ========================================
+# Qstub 认证测试用例
+# ========================================
+
+test_qstub_create_account() {
+    log_info "Creating Qstub authentication context..."
+
+    # 构建 Qstub Token
+    # Qstub Token 格式: Base64({"uid":"12345","email":"user@qiniu.com","name":"User Name"})
+    QSTUB_UID="12345"
+    QSTUB_EMAIL="qstub-test@qiniu.com"
+    QSTUB_NAME="Qstub Test User"
+
+    USER_INFO="{\"uid\":\"$QSTUB_UID\",\"email\":\"$QSTUB_EMAIL\",\"name\":\"$QSTUB_NAME\"}"
+    QSTUB_TOKEN=$(echo -n "$USER_INFO" | base64 -w 0)
+
+    # 导出全局变量
+    export QSTUB_TOKEN
+    export QSTUB_UID
+    export QSTUB_EMAIL
+
+    log_success "Qstub authentication context created"
+    log_info "Qstub UID: $QSTUB_UID"
+    log_info "Qstub Email: $QSTUB_EMAIL"
+    log_info "Qstub Token: ${QSTUB_TOKEN:0:30}..."
+
+    # 保存到文件
+    echo "QSTUB_TOKEN=$QSTUB_TOKEN" >> /tmp/v2_test_credentials.env
+    echo "QSTUB_UID=$QSTUB_UID" >> /tmp/v2_test_credentials.env
+}
+
+test_qstub_create_token() {
+    log_info "Creating Bearer Token using Qstub authentication..."
+
+    response=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: Bearer $QSTUB_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "description": "Qstub test token",
+            "scope": ["storage:read", "storage:write"],
+            "expires_in_seconds": 3600
+        }')
+
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "201" ]; then
+        # 提取 Token ID 和值
+        QSTUB_TOKEN_ID=$(echo "$body" | grep -o '"token_id":"[^"]*"' | cut -d'"' -f4)
+        QSTUB_BEARER_TOKEN=$(echo "$body" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+        QSTUB_ACCOUNT_ID=$(echo "$body" | grep -o '"account_id":"[^"]*"' | cut -d'"' -f4)
+
+        export QSTUB_TOKEN_ID
+        export QSTUB_BEARER_TOKEN
+        export QSTUB_ACCOUNT_ID
+
+        log_success "Token created via Qstub authentication"
+        log_info "Token ID: $QSTUB_TOKEN_ID"
+        log_info "Account ID: $QSTUB_ACCOUNT_ID"
+        log_info "Bearer Token: ${QSTUB_BEARER_TOKEN:0:30}..."
+
+        # 保存到文件
+        echo "QSTUB_TOKEN_ID=$QSTUB_TOKEN_ID" >> /tmp/v2_test_credentials.env
+        echo "QSTUB_BEARER_TOKEN=$QSTUB_BEARER_TOKEN" >> /tmp/v2_test_credentials.env
+        echo "QSTUB_ACCOUNT_ID=$QSTUB_ACCOUNT_ID" >> /tmp/v2_test_credentials.env
+    else
+        log_error "Failed to create token via Qstub with status $http_code"
+        echo "$body"
+        exit 1
+    fi
+}
+
+test_qstub_list_tokens() {
+    log_info "Listing tokens using Qstub authentication..."
+
+    response=$(curl -s -w "\n%{http_code}" -X GET "$BASE_URL/api/v2/tokens?limit=10" \
+        -H "Authorization: Bearer $QSTUB_TOKEN")
+
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "200" ]; then
+        log_success "Tokens listed successfully via Qstub"
+        TOKEN_COUNT=$(echo "$body" | grep -o '"total":[0-9]*' | cut -d':' -f2)
+        log_info "Total tokens: $TOKEN_COUNT"
+        echo "$body" | python3 -m json.tool 2>/dev/null || echo "$body"
+    else
+        log_error "Failed to list tokens via Qstub with status $http_code"
+        echo "$body"
+        exit 1
+    fi
+}
+
+test_qstub_get_token() {
+    log_info "Getting token info using Qstub authentication..."
+
+    response=$(curl -s -w "\n%{http_code}" -X GET "$BASE_URL/api/v2/tokens/$QSTUB_TOKEN_ID" \
+        -H "Authorization: Bearer $QSTUB_TOKEN")
+
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "200" ]; then
+        log_success "Token info retrieved via Qstub"
+        echo "$body" | python3 -m json.tool 2>/dev/null || echo "$body"
+    else
+        log_error "Failed to get token info via Qstub with status $http_code"
+        echo "$body"
+        exit 1
+    fi
+}
+
+test_qstub_update_token() {
+    log_info "Updating token status using Qstub authentication..."
+
+    # 禁用 Token
+    response=$(curl -s -w "\n%{http_code}" -X PUT "$BASE_URL/api/v2/tokens/$QSTUB_TOKEN_ID/status" \
+        -H "Authorization: Bearer $QSTUB_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d '{"enabled": false}')
+
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "200" ]; then
+        log_success "Token disabled via Qstub"
+
+        # 重新启用
+        log_info "Re-enabling token..."
+        response=$(curl -s -w "\n%{http_code}" -X PUT "$BASE_URL/api/v2/tokens/$QSTUB_TOKEN_ID/status" \
+            -H "Authorization: Bearer $QSTUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"enabled": true}')
+
+        http_code=$(echo "$response" | tail -n1)
+        if [ "$http_code" = "200" ]; then
+            log_success "Token re-enabled via Qstub"
+        else
+            log_error "Failed to re-enable token"
+            exit 1
+        fi
+    else
+        log_error "Failed to update token status via Qstub with status $http_code"
+        echo "$body"
+        exit 1
+    fi
+}
+
+test_qstub_delete_token() {
+    log_info "Deleting token using Qstub authentication..."
+
+    response=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE_URL/api/v2/tokens/$QSTUB_TOKEN_ID" \
+        -H "Authorization: Bearer $QSTUB_TOKEN")
+
+    http_code=$(echo "$response" | tail -n1)
+    body=$(echo "$response" | sed '$d')
+
+    if [ "$http_code" = "200" ]; then
+        log_success "Token deleted via Qstub"
+    else
+        log_error "Failed to delete token via Qstub with status $http_code"
+        echo "$body"
+        exit 1
+    fi
+}
+
+test_qstub_account_mapping() {
+    log_info "Verifying Qstub Account ID mapping..."
+
+    # 验证 account_id 格式应该是 qiniu_{uid}
+    EXPECTED_ACCOUNT_ID="qiniu_$QSTUB_UID"
+
+    if [ "$QSTUB_ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID" ]; then
+        log_success "Account ID mapping is correct"
+        log_info "Expected: $EXPECTED_ACCOUNT_ID"
+        log_info "Actual:   $QSTUB_ACCOUNT_ID"
+    else
+        log_error "Account ID mapping mismatch!"
+        log_info "Expected: $EXPECTED_ACCOUNT_ID"
+        log_info "Actual:   $QSTUB_ACCOUNT_ID"
+        exit 1
+    fi
+
+    # 测试使用生成的 Bearer Token 访问 API
+    log_info "Testing Bearer Token created via Qstub..."
+    response=$(curl -s -X POST "$BASE_URL/api/v2/validate" \
+        -H "Authorization: Bearer $QSTUB_BEARER_TOKEN" \
+        -H "Content-Type: application/json")
+
+    if echo "$response" | grep -q '"valid":true'; then
+        log_success "Bearer Token validation passed"
+        echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
+    else
+        log_error "Bearer Token validation failed"
+        echo "$response"
         exit 1
     fi
 }

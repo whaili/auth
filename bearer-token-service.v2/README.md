@@ -1,6 +1,29 @@
 # Bearer Token Service V2
 
-> 云厂商级多租户认证服务 - 基于 HMAC 签名、Scope 权限控制、租户隔离
+> 认证服务 - 基于 HMAC 签名、Scope 权限控制、秒级过期时间精度
+
+[![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
+[![MongoDB](https://img.shields.io/badge/MongoDB-4.0+-green.svg)](https://www.mongodb.com)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+## 📖 文档导航
+
+- **完整文档**: [docs/README.md](docs/README.md) - 查看所有文档目录
+- **API 文档**: [docs/api/API.md](docs/api/API.md) - 完整 API 参考
+- **部署指南**: [docs/deployment/DOCKER_QUICKSTART.md](docs/deployment/DOCKER_QUICKSTART.md) - 快速部署
+- **架构说明**: [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) - 系统架构
+
+---
+
+## ✨ 核心特性
+
+- **多租户隔离**: 完全的数据隔离，支持 SaaS 化部署
+- **HMAC 签名认证**: HMAC-SHA256 签名，对标七牛云、AWS、阿里云
+- **细粒度权限控制**: 基于 Scope 的权限系统，支持通配符
+- **秒级过期时间**: ⭐ 支持秒级精度的 Token 过期时间设置
+- **Token 隐藏显示**: 中间 30 个字符隐藏，保护安全
+- **审计日志**: 完整的操作审计记录
+- **生产就绪**: systemd集成、日志管理、性能优化
 
 ---
 
@@ -149,13 +172,13 @@ class TokenClient:
         ).digest()
         return base64.b64encode(signature).decode()
 
-    def create_token(self, description, scope, expires_in_days):
+    def create_token(self, description, scope, expires_in_seconds):
         uri = "/api/v2/tokens"
         timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         body = json.dumps({
             "description": description,
             "scope": scope,
-            "expires_in_days": expires_in_days
+            "expires_in_seconds": expires_in_seconds
         })
 
         signature = self._sign("POST", uri, timestamp, body)
@@ -178,9 +201,39 @@ client = TokenClient(
 token = client.create_token(
     description="Production token",
     scope=["storage:read", "cdn:refresh"],
-    expires_in_days=90
+    expires_in_seconds=7776000  # 90天 = 90*24*3600秒
 )
 print(token)
+```
+
+---
+
+## 📊 过期时间精度（秒级）
+
+### 常用时间换算
+
+| 时长 | 秒数 | 用途 |
+|------|------|------|
+| 5分钟 | 300 | 临时测试 |
+| 1小时 | 3,600 | 临时访问 |
+| 1天 | 86,400 | 日常使用 |
+| 7天 | 604,800 | 周期访问 |
+| 30天 | 2,592,000 | 月度访问 |
+| 90天 | 7,776,000 | 季度访问 |
+| 365天 | 31,536,000 | 年度访问 |
+| 永不过期 | 0 | 生产环境 |
+
+### 使用示例
+
+```python
+# 1小时过期
+"expires_in_seconds": 3600
+
+# 90天过期
+"expires_in_seconds": 7776000
+
+# 永不过期
+"expires_in_seconds": 0
 ```
 
 ---
@@ -188,14 +241,16 @@ print(token)
 ## 🧪 测试
 
 ```bash
-# 单元测试
-go test ./...
+# 运行完整测试脚本
+python3 scripts/test.py
 
-# 测试覆盖率
-go test -cover ./...
-
-# 集成测试（需要 MongoDB）
-go test -tags=integration ./...
+# 测试包括:
+# ✅ 账户注册
+# ✅ Token 创建（1小时过期 = 3600秒）
+# ✅ Token 创建（90天过期 = 7776000秒）
+# ✅ Token 验证
+# ✅ 列出 Tokens
+# ✅ 获取账户信息
 ```
 
 ---
@@ -231,6 +286,7 @@ export TIMESTAMP_TOLERANCE="15m"
 | 特性 | V1 | V2 |
 |------|----|----|
 | 认证方式 | Basic Auth | HMAC 签名 |
+| 过期时间精度 | 天级 (expires_in_days) | ⭐ 秒级 (expires_in_seconds) |
 | 租户隔离 | ❌ 无 | ✅ 完全隔离 |
 | 权限控制 | ❌ 无 | ✅ Scope 权限 |
 | 防重放攻击 | ❌ 无 | ✅ 时间戳验证 |
@@ -245,6 +301,7 @@ MIT
 
 ---
 
-**版本**: 2.0
-**更新日期**: 2025-12-25
+**版本**: 2.0.0
+**更新日期**: 2025-12-26
 **参考标准**: AWS Signature V4, Qiniu Qbox Auth, OAuth 2.0
+**重大更新**: ⭐ 新增秒级过期时间精度 (`expires_in_seconds`)

@@ -33,7 +33,7 @@ URI="/api/v2/tokens"
 TIMESTAMP="2025-12-25T10:00:00Z"
 ACCESS_KEY="AK_f8e7d6c5b4a392817a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4"
 SECRET_KEY="SK_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2"
-BODY='{"description":"test token","scope":["storage:read"],"expires_in_days":90}'
+BODY='{"description":"test token","scope":["storage:read"],"expires_in_seconds":7776000}'  # 90天 = 90*24*3600秒
 
 # 构建待签名字符串
 STRING_TO_SIGN="${METHOD}\n${URI}\n${TIMESTAMP}\n${BODY}"
@@ -160,7 +160,7 @@ Content-Type: application/json
 {
   "description": "Production read-only token",
   "scope": ["storage:read", "cdn:refresh"],
-  "expires_in_days": 90,
+  "expires_in_seconds": 7776000,
   "prefix": "custom_bearer_",
   "rate_limit": {
     "requests_per_minute": 1000
@@ -193,7 +193,8 @@ Content-Type: application/json
   - `"storage:read"` - 存储读权限
   - `"storage:*"` - 存储所有权限
   - `"*"` - 全部权限
-- `expires_in_days`: 过期天数，0 表示永不过期（可选）
+- `expires_in_seconds`: 过期时间（秒），0 表示永不过期（可选）
+  - 示例：`3600`（1小时）、`86400`（1天）、`7776000`（90天）
 - `prefix`: 自定义 Token 前缀（可选，默认 `sk-`，保持与 V1 兼容）
   - 示例：`"custom_bearer_"`, `"my_token_"`, `"prod_"`
 - `rate_limit`: API 频率限制（可选）
@@ -537,13 +538,13 @@ class QiniuTokenClient:
         ).digest()
         return base64.b64encode(signature).decode()
 
-    def create_token(self, description, scope, expires_in_days):
+    def create_token(self, description, scope, expires_in_seconds):
         uri = "/api/v2/tokens"
         timestamp = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         body = json.dumps({
             "description": description,
             "scope": scope,
-            "expires_in_days": expires_in_days
+            "expires_in_seconds": expires_in_seconds
         })
 
         signature = self._sign("POST", uri, timestamp, body)
@@ -572,7 +573,7 @@ client = QiniuTokenClient(
 token = client.create_token(
     description="Production token",
     scope=["storage:read", "cdn:refresh"],
-    expires_in_days=90
+    expires_in_seconds=7776000  # 90天 = 90*24*3600秒
 )
 
 print(token)

@@ -179,7 +179,7 @@ URI="/api/v2/tokens"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ACCESS_KEY="AK_f8e7d6c5b4a39281"
 SECRET_KEY="SK_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
-BODY='{"description":"Token","scope":["storage:read"],"expires_in_days":90}'
+BODY='{"description":"Token","scope":["storage:read"],"expires_in_seconds":7776000}'  # 90天 = 90*24*3600秒
 
 # 构造签名字符串 (只签名 path，不包含 query)
 STRING_TO_SIGN="${METHOD}\n${URI}\n${TIMESTAMP}\n${BODY}"
@@ -424,7 +424,7 @@ Content-Type: application/json
 {
   "description": "Production read-only token",
   "scope": ["storage:read", "cdn:refresh"],
-  "expires_in_days": 90,
+  "expires_in_seconds": 7776000,  # 90天 = 90*24*3600秒
   "prefix": "custom_bearer_",
   "rate_limit": {
     "requests_per_minute": 1000

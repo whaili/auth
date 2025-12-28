@@ -184,6 +184,64 @@ func (r *MongoAccountRepository) Count(ctx context.Context) (int64, error) {
 	return r.collection.CountDocuments(ctx, bson.M{})
 }
 
+// GetAccountByQiniuUID 根据七牛 UID 查询账户 ID
+func (r *MongoAccountRepository) GetAccountByQiniuUID(ctx context.Context, qiniuUID uint32) (string, error) {
+	var account interfaces.Account
+	err := r.collection.FindOne(ctx, bson.M{"qiniu_uid": qiniuUID}).Decode(&account)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return "", errors.New("account not found for qiniu uid")
+		}
+		return "", err
+	}
+	return account.ID, nil
+}
+
+// CreateAccountForQiniuUID 为七牛 UID 创建新账户
+func (r *MongoAccountRepository) CreateAccountForQiniuUID(ctx context.Context, qiniuUID uint32, email string) (string, error) {
+	// 生成账户 ID
+	accountID := primitive.NewObjectID().Hex()
+
+	// 如果没有提供邮箱，使用默认格式
+	if email == "" {
+		email = "qiniu_" + primitive.NewObjectID().Hex() + "@auto-created.local"
+	}
+
+	// 生成 AccessKey 和 SecretKey
+	accessKey, err := generateAccessKey()
+	if err != nil {
+		return "", err
+	}
+
+	secretKey, err := GenerateSecretKey()
+	if err != nil {
+		return "", err
+	}
+
+	// 创建账户
+	now := time.Now()
+	account := &interfaces.Account{
+		ID:        accountID,
+		Email:     email,
+		AccessKey: accessKey,
+		SecretKey: secretKey,
+		Status:    "active",
+		QiniuUID:  qiniuUID, // 存储七牛 UID
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	_, err = r.collection.InsertOne(ctx, account)
+	if err != nil {
+		if mongo.IsDuplicateKeyError(err) {
+			return "", errors.New("account with this qiniu_uid already exists")
+		}
+		return "", err
+	}
+
+	return accountID, nil
+}
+
 // CreateIndexes 创建索引
 func (r *MongoAccountRepository) CreateIndexes(ctx context.Context) error {
 	indexes := []mongo.IndexModel{
@@ -197,6 +255,10 @@ func (r *MongoAccountRepository) CreateIndexes(ctx context.Context) error {
 		},
 		{
 			Keys: bson.D{{Key: "status", Value: 1}},
+		},
+		{
+			Keys:    bson.D{{Key: "qiniu_uid", Value: 1}},
+			Options: options.Index().SetUnique(true).SetSparse(true), // 稀疏索引，允许不存在该字段
 		},
 	}
 

@@ -1,0 +1,28 @@
+[Unit]
+Description=Bearer Token Service V2
+Documentation=https://github.com/your-org/bearer-token-service
+After=network.target mongod.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/src/auth/bearer-token-service.v2
+ExecStart=/opt/src/auth/bearer-token-service.v2/bin/tokenserv
+Restart=on-failure
+RestartSec=5s
+
+# 环境变量
+Environment="PORT=8080"
+Environment="MONGO_URI=mongodb://localhost:27017"
+Environment="MONGO_DATABASE=token_service_v2"
+
+# 日志
+StandardOutput=append:/opt/src/auth/bearer-token-service.v2/logs/service.log
+StandardError=append:/opt/src/auth/bearer-token-service.v2/logs/service.log
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -14,6 +14,7 @@ type Account struct {
 	AccessKey string    `bson:"access_key" json:"access_key"` // AK_xxx
 	SecretKey string    `bson:"secret_key" json:"-"`          // bcrypt 加密，不返回客户端
 	Status    string    `bson:"status" json:"status"`         // active, suspended
+	QiniuUID  uint32    `bson:"qiniu_uid,omitempty" json:"qiniu_uid,omitempty"` // 七牛 UID（可选）
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
 }
@@ -87,11 +88,11 @@ type RegenerateSecretKeyResponse struct {
 
 // TokenCreateRequest 创建 Token 请求
 type TokenCreateRequest struct {
-	Description   string     `json:"description" binding:"required"`
-	Scope         []string   `json:"scope" binding:"required,min=1"`         // 至少一个权限
-	ExpiresInDays int        `json:"expires_in_days,omitempty"`              // 0 表示永不过期
-	RateLimit     *RateLimit `json:"rate_limit,omitempty"`
-	Prefix        string     `json:"prefix,omitempty"`                       // 自定义 Token 前缀，默认 "sk-"
+	Description      string     `json:"description" binding:"required"`
+	Scope            []string   `json:"scope" binding:"required,min=1"`            // 至少一个权限
+	ExpiresInSeconds int64      `json:"expires_in_seconds,omitempty"`              // 0 表示永不过期，支持秒级精度
+	RateLimit        *RateLimit `json:"rate_limit,omitempty"`
+	Prefix           string     `json:"prefix,omitempty"`                          // 自定义 Token 前缀，默认 "sk-"
 }
 
 // TokenCreateResponse 创建 Token 响应

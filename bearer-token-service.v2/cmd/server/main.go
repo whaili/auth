@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -51,18 +53,25 @@ func main() {
 	tokenRepo := repository.NewMongoTokenRepository(db)
 	auditRepo := repository.NewMongoAuditLogRepository(db)
 
-	// 创建索引
-	log.Println("📊 Creating database indexes...")
-	if err := accountRepo.CreateIndexes(context.Background()); err != nil {
-		log.Printf("⚠️  Warning: Failed to create account indexes: %v", err)
+	// 创建索引（可通过环境变量跳过，用于多实例负载均衡部署）
+	skipIndexCreation := os.Getenv("SKIP_INDEX_CREATION") == "true"
+
+	if skipIndexCreation {
+		log.Println("⏭️  Skipping index creation (SKIP_INDEX_CREATION=true)")
+		log.Println("ℹ️  Ensure indexes are created by running: scripts/init/init-db.sh")
+	} else {
+		log.Println("📊 Creating database indexes...")
+		if err := accountRepo.CreateIndexes(context.Background()); err != nil {
+			log.Printf("⚠️  Warning: Failed to create account indexes: %v", err)
+		}
+		if err := tokenRepo.CreateIndexes(context.Background()); err != nil {
+			log.Printf("⚠️  Warning: Failed to create token indexes: %v", err)
+		}
+		if err := auditRepo.CreateIndexes(context.Background()); err != nil {
+			log.Printf("⚠️  Warning: Failed to create audit log indexes: %v", err)
+		}
+		log.Println("✅ Database indexes created")
 	}
-	if err := tokenRepo.CreateIndexes(context.Background()); err != nil {
-		log.Printf("⚠️  Warning: Failed to create token indexes: %v", err)
-	}
-	if err := auditRepo.CreateIndexes(context.Background()); err != nil {
-		log.Printf("⚠️  Warning: Failed to create audit log indexes: %v", err)
-	}
-	log.Println("✅ Database indexes created")
 
 	// ========================================
 	// 3. 初始化 Service 层
@@ -84,15 +93,54 @@ func main() {
 	log.Println("✅ Handlers initialized")
 
 	// ========================================
-	// 5. 创建认证中间件
+	// 5. 创建认证中间件（统一认证：HMAC + Qstub）
 	// ========================================
-	// 实现 AccountFetcher 接口
-	accountFetcher := &AccountFetcherImpl{repo: accountRepo}
+	// 5.1 配置 AccountFetcher（账户查询方式）
+	var accountFetcher auth.AccountFetcher
+	accountFetcherMode := os.Getenv("ACCOUNT_FETCHER_MODE") // "local" 或 "external"
 
-	// 创建 HMAC 认证中间件（15 分钟时间窗口）
-	hmacMiddleware := auth.NewHMACMiddleware(accountFetcher, 15*time.Minute)
+	if accountFetcherMode == "external" {
+		// 外部 API 模式（用于共用数据库场景）
+		externalAPIURL := os.Getenv("EXTERNAL_ACCOUNT_API_URL")
+		externalAPIToken := os.Getenv("EXTERNAL_ACCOUNT_API_TOKEN")
 
-	log.Println("✅ Authentication middleware initialized")
+		if externalAPIURL == "" {
+			log.Fatal("❌ EXTERNAL_ACCOUNT_API_URL is required when ACCOUNT_FETCHER_MODE=external")
+		}
+
+		accountFetcher = NewExternalAccountFetcher(externalAPIURL, externalAPIToken)
+		log.Printf("✅ Using External AccountFetcher (API: %s)", externalAPIURL)
+	} else {
+		// 本地 MongoDB 模式（默认）
+		accountFetcher = &MongoAccountFetcher{repo: accountRepo}
+		log.Println("✅ Using Local MongoDB AccountFetcher")
+	}
+
+	// 5.2 配置七牛 UID 映射器
+	var qiniuUIDMapper auth.QiniuUIDMapper
+	mapperMode := os.Getenv("QINIU_UID_MAPPER_MODE") // "simple" 或 "database"
+
+	if mapperMode == "database" {
+		// 数据库模式（查询或创建映射关系）
+		autoCreate := os.Getenv("QINIU_UID_AUTO_CREATE") == "true"
+		qiniuUIDMapper = auth.NewDatabaseQiniuUIDMapper(accountRepo, autoCreate)
+		log.Printf("✅ Using DatabaseQiniuUIDMapper (autoCreate=%v)", autoCreate)
+	} else {
+		// 简单模式（默认）：直接转换为 qiniu_{uid}
+		qiniuUIDMapper = auth.NewSimpleQiniuUIDMapper()
+		log.Println("✅ Using SimpleQiniuUIDMapper (format: qiniu_{uid})")
+	}
+
+	// 5.3 创建统一认证中间件
+	timestampTolerance := 15 * time.Minute
+	if toleranceStr := os.Getenv("HMAC_TIMESTAMP_TOLERANCE"); toleranceStr != "" {
+		if duration, err := time.ParseDuration(toleranceStr); err == nil {
+			timestampTolerance = duration
+		}
+	}
+
+	unifiedMiddleware := auth.NewUnifiedAuthMiddleware(accountFetcher, qiniuUIDMapper, timestampTolerance)
+	log.Printf("✅ Unified authentication middleware initialized (HMAC + Qstub, tolerance=%v)", timestampTolerance)
 
 	// ========================================
 	// 6. 设置路由
@@ -108,17 +156,17 @@ func main() {
 	// 账户管理（不需要认证的注册接口）
 	router.HandleFunc("/api/v2/accounts/register", accountHandler.Register).Methods("POST")
 
-	// 账户管理（需要 HMAC 认证）
-	router.HandleFunc("/api/v2/accounts/me", hmacMiddleware.Authenticate(accountHandler.GetAccountInfo)).Methods("GET")
-	router.HandleFunc("/api/v2/accounts/regenerate-sk", hmacMiddleware.Authenticate(accountHandler.RegenerateSecretKey)).Methods("POST")
+	// 账户管理（需要认证：支持 HMAC 或 Qstub）
+	router.HandleFunc("/api/v2/accounts/me", unifiedMiddleware.Authenticate(accountHandler.GetAccountInfo)).Methods("GET")
+	router.HandleFunc("/api/v2/accounts/regenerate-sk", unifiedMiddleware.Authenticate(accountHandler.RegenerateSecretKey)).Methods("POST")
 
-	// Token 管理（需要 HMAC 认证）
-	router.HandleFunc("/api/v2/tokens", hmacMiddleware.Authenticate(tokenHandler.CreateToken)).Methods("POST")
-	router.HandleFunc("/api/v2/tokens", hmacMiddleware.Authenticate(tokenHandler.ListTokens)).Methods("GET")
-	router.HandleFunc("/api/v2/tokens/{id}", hmacMiddleware.Authenticate(tokenHandler.GetTokenInfo)).Methods("GET")
-	router.HandleFunc("/api/v2/tokens/{id}/status", hmacMiddleware.Authenticate(tokenHandler.UpdateTokenStatus)).Methods("PUT")
-	router.HandleFunc("/api/v2/tokens/{id}", hmacMiddleware.Authenticate(tokenHandler.DeleteToken)).Methods("DELETE")
-	router.HandleFunc("/api/v2/tokens/{id}/stats", hmacMiddleware.Authenticate(tokenHandler.GetTokenStats)).Methods("GET")
+	// Token 管理（需要认证：支持 HMAC 或 Qstub）
+	router.HandleFunc("/api/v2/tokens", unifiedMiddleware.Authenticate(tokenHandler.CreateToken)).Methods("POST")
+	router.HandleFunc("/api/v2/tokens", unifiedMiddleware.Authenticate(tokenHandler.ListTokens)).Methods("GET")
+	router.HandleFunc("/api/v2/tokens/{id}", unifiedMiddleware.Authenticate(tokenHandler.GetTokenInfo)).Methods("GET")
+	router.HandleFunc("/api/v2/tokens/{id}/status", unifiedMiddleware.Authenticate(tokenHandler.UpdateTokenStatus)).Methods("PUT")
+	router.HandleFunc("/api/v2/tokens/{id}", unifiedMiddleware.Authenticate(tokenHandler.DeleteToken)).Methods("DELETE")
+	router.HandleFunc("/api/v2/tokens/{id}/stats", unifiedMiddleware.Authenticate(tokenHandler.GetTokenStats)).Methods("GET")
 
 	// Token 验证（使用 Bearer Token 认证）
 	router.HandleFunc("/api/v2/validate", validationHandler.ValidateToken).Methods("POST")
@@ -148,13 +196,13 @@ func main() {
 }
 
 // ========================================
-// AccountFetcherImpl 实现 auth.AccountFetcher 接口
+// MongoAccountFetcher 实现 auth.AccountFetcher 接口（本地 MongoDB）
 // ========================================
-type AccountFetcherImpl struct {
+type MongoAccountFetcher struct {
 	repo *repository.MongoAccountRepository
 }
 
-func (f *AccountFetcherImpl) GetAccountByAccessKey(ctx context.Context, accessKey string) (*auth.AccountInfo, error) {
+func (f *MongoAccountFetcher) GetAccountByAccessKey(ctx context.Context, accessKey string) (*auth.AccountInfo, error) {
 	account, err := f.repo.GetByAccessKey(ctx, accessKey)
 	if err != nil {
 		return nil, err
@@ -170,5 +218,78 @@ func (f *AccountFetcherImpl) GetAccountByAccessKey(ctx context.Context, accessKe
 		AccessKey: account.AccessKey,
 		SecretKey: account.SecretKey, // 已加密的 SecretKey
 		Status:    account.Status,
+	}, nil
+}
+
+// ========================================
+// ExternalAccountFetcher 实现 auth.AccountFetcher 接口（外部 API）
+// 用于查询共用的外部账户系统
+// ========================================
+type ExternalAccountFetcher struct {
+	apiBaseURL string
+	apiToken   string
+	httpClient *http.Client
+}
+
+func NewExternalAccountFetcher(apiBaseURL, apiToken string) *ExternalAccountFetcher {
+	return &ExternalAccountFetcher{
+		apiBaseURL: apiBaseURL,
+		apiToken:   apiToken,
+		httpClient: &http.Client{
+			Timeout: 5 * time.Second,
+		},
+	}
+}
+
+func (f *ExternalAccountFetcher) GetAccountByAccessKey(ctx context.Context, accessKey string) (*auth.AccountInfo, error) {
+	// 构建请求 URL
+	url := f.apiBaseURL + "/api/accounts?access_key=" + accessKey
+
+	// 创建请求
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// 添加认证头（如果配置了 API Token）
+	if f.apiToken != "" {
+		req.Header.Set("Authorization", "Bearer "+f.apiToken)
+	}
+
+	// 发送请求
+	resp, err := f.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// 检查响应状态
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil // 账户不存在
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("external account API returned status %s", resp.Status)
+	}
+
+	// 解析响应
+	var result struct {
+		ID        string `json:"id"`
+		Email     string `json:"email"`
+		AccessKey string `json:"access_key"`
+		SecretKey string `json:"secret_key"`
+		Status    string `json:"status"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return &auth.AccountInfo{
+		ID:        result.ID,
+		Email:     result.Email,
+		AccessKey: result.AccessKey,
+		SecretKey: result.SecretKey,
+		Status:    result.Status,
 	}, nil
 }
