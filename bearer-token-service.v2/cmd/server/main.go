@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"bearer-token-service.v1/v2/auth"
@@ -44,7 +45,24 @@ func main() {
 	}
 	log.Println("✅ Connected to MongoDB")
 
-	db := client.Database("token_service_v2")
+	// 数据库名称（优先级：环境变量 > URI 中的数据库名 > 默认值）
+	dbName := os.Getenv("MONGO_DATABASE")
+	if dbName == "" {
+		// 尝试从 MONGO_URI 中解析数据库名
+		// 格式: mongodb://user:pass@host:port/dbname?options
+		dbName = extractDatabaseFromURI(mongoURI)
+
+		// 如果还是没有，使用默认值
+		if dbName == "" {
+			dbName = "token_service_v2"
+			log.Printf("⚠️  Warning: No database name specified in MONGO_URI or MONGO_DATABASE, using default: %s", dbName)
+		} else {
+			log.Printf("ℹ️  Using database from MONGO_URI: %s", dbName)
+		}
+	} else {
+		log.Printf("ℹ️  Using database from MONGO_DATABASE env: %s", dbName)
+	}
+	db := client.Database(dbName)
 
 	// ========================================
 	// 2. 初始化 Repository 层
@@ -193,6 +211,43 @@ func main() {
 	if err := http.ListenAndServe(":"+port, router); err != nil {
 		log.Fatalf("❌ Server failed to start: %v", err)
 	}
+}
+
+// ========================================
+// 辅助函数：从 MongoDB URI 中提取数据库名
+// ========================================
+// extractDatabaseFromURI 从 MongoDB 连接字符串中提取数据库名
+// 支持格式:
+//   - mongodb://host:port/dbname
+//   - mongodb://user:pass@host:port/dbname
+//   - mongodb://host1:port1,host2:port2/dbname?options
+func extractDatabaseFromURI(uri string) string {
+	// 移除协议前缀
+	uri = strings.TrimPrefix(uri, "mongodb://")
+	uri = strings.TrimPrefix(uri, "mongodb+srv://")
+
+	// 移除认证信息（user:pass@）
+	if atIndex := strings.Index(uri, "@"); atIndex != -1 {
+		uri = uri[atIndex+1:]
+	}
+
+	// 查找第一个 / 后的数据库名
+	if slashIndex := strings.Index(uri, "/"); slashIndex != -1 {
+		dbPart := uri[slashIndex+1:]
+
+		// 移除查询参数（?后的内容）
+		if questionIndex := strings.Index(dbPart, "?"); questionIndex != -1 {
+			dbPart = dbPart[:questionIndex]
+		}
+
+		// 返回数据库名（如果不为空）
+		dbName := strings.TrimSpace(dbPart)
+		if dbName != "" {
+			return dbName
+		}
+	}
+
+	return ""
 }
 
 // ========================================

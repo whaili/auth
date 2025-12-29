@@ -29,18 +29,91 @@ Bearer Token Service V2 在负载均衡多实例部署时，为了避免每个�
 
 ---
 
-## 🚀 快速开始（生产环境）
+## 🚀 快速开始
 
-### 步骤 1: 初始化数据库
+### 部署模式检测
+
+初始化脚本会自动检测部署模式：
+
+1. **外部 MongoDB**: 检测到 `MONGO_URI` 环境变量
+2. **Docker MongoDB**: 未设置 `MONGO_URI`，自动连接 Docker 容器
+
+---
+
+### 模式 1: 外部 MongoDB（生产环境）
+
+适用于使用外部 MongoDB 副本集（1主2备）的生产环境。
+
+#### 步骤 1: 配置环境变量
+
+```bash
+# 设置副本集连接字符串
+export MONGO_URI="mongodb://bearer_token_wr:password@10.70.65.39:27019,10.70.65.40:27019,10.70.65.41:27019/bearer_token_service?replicaSet=rs0&authSource=admin"
+```
+
+**重要**: MONGO_URI 必须包含：
+- ✅ 所有副本集节点地址（主节点+从节点）
+- ✅ 数据库名称（如 `/bearer_token_service`）
+- ✅ 副本集名称（如 `?replicaSet=rs0`）
+- ✅ 认证数据库（如 `&authSource=admin`）
+
+#### 步骤 2: 安装 mongosh
+
+```bash
+# Ubuntu/Debian
+sudo apt install mongodb-mongosh
+
+# CentOS/RHEL
+sudo yum install mongodb-mongosh
+
+# 验证安装
+mongosh --version
+```
+
+#### 步骤 3: 执行初始化
+
+```bash
+# 进入部署目录
+cd /opt/src/auth/bearer-token-service.v2/dist/deploy
+
+# 执行初始化脚本
+./scripts/init/init-db.sh
+```
+
+**预期输出**：
+```
+========================================
+Bearer Token Service V2 - 数据库初始化
+========================================
+
+🌐 检测到外部 MongoDB 配置
+📋 配置信息:
+   MONGO_URI: mongodb://***:***@10.70.65.39:27019,...
+
+✅ 找到 mongosh 命令
+✅ MongoDB 连接成功
+🚀 开始创建索引...
+========================================
+✅ 数据库初始化成功！
+========================================
+```
+
+---
+
+### 模式 2: Docker MongoDB（本地开发/测试）
+
+适用于使用 Docker Compose 内置 MongoDB 容器的环境。
+
+#### 步骤 1: 初始化数据库
 
 在**部署服务实例之前**，先运行初始化脚本：
 
 ```bash
-# 进入项目目录
+# 进入项目目录（宿主机）
 cd /root/src/auth/bearer-token-service.v2
 
-# 设置环境变量（可选）
-export MONGO_URI="mongodb://localhost:27017"
+# 不设置 MONGO_URI（自动检测 Docker 容器）
+# 可选：设置数据库名称
 export MONGO_DATABASE="token_service_v2"
 
 # 执行初始化脚本

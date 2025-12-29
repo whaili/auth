@@ -14,10 +14,65 @@ Bearer Token Service V2 支持通过环境变量进行灵活配置，方便在�
 | `QINIU_UID_MAPPER_MODE` | UID 映射方式 | `simple` / `database` | `simple` | 否 |
 | `QINIU_UID_AUTO_CREATE` | 自动创建账户 | `true` / `false` | `false` | 否 |
 | `HMAC_TIMESTAMP_TOLERANCE` | 时间戳容忍度 | Duration (如 `15m`) | `15m` | 否 |
+| `SKIP_INDEX_CREATION` | 跳过索引创建 | `true` / `false` | `false` | 否 |
 
 ---
 
 ## 🔧 配置详解
+
+### 0. MongoDB 连接配置
+
+#### 本地 MongoDB
+
+```bash
+# 单机模式
+export MONGO_URI=mongodb://localhost:27017
+
+# 带认证
+export MONGO_URI=mongodb://user:password@localhost:27017/dbname?authSource=admin
+```
+
+#### 外部 MongoDB 副本集（生产环境）
+
+```bash
+# 副本集连接字符串格式
+mongodb://用户名:密码@主节点:端口,从节点1:端口,从节点2:端口/数据库名?replicaSet=副本集名&authSource=admin&其他参数
+```
+
+**重要参数说明**:
+
+| 参数 | 必填 | 说明 | 推荐值 |
+|------|------|------|--------|
+| `/数据库名` | ✅ | 数据库名称，**必须指定** | `/bearer_token_service` |
+| `replicaSet` | ✅ | 副本集名称 | `rs0` (根据实际配置) |
+| `authSource` | ✅ | 认证数据库 | `admin` |
+| `readPreference` | ❌ | 读偏好 | `primaryPreferred` |
+| `retryWrites` | ❌ | 自动重试写入 | `true` |
+| `w` | ❌ | 写确认级别 | `majority` |
+| `maxPoolSize` | ❌ | 连接池大小 | `50` |
+
+**完整示例（1主2备）**:
+
+```bash
+# 基础配置
+MONGO_URI=mongodb://bearer_token_wr:password@10.70.65.39:27019,10.70.65.40:27019,10.70.65.41:27019/bearer_token_service?replicaSet=rs0&authSource=admin
+
+# 高可用配置（推荐）
+MONGO_URI=mongodb://bearer_token_wr:password@10.70.65.39:27019,10.70.65.40:27019,10.70.65.41:27019/bearer_token_service?replicaSet=rs0&authSource=admin&readPreference=primaryPreferred&retryWrites=true&w=majority&maxPoolSize=50
+```
+
+**常见错误**:
+
+❌ 错误：缺少数据库名称
+```bash
+# 会连接到默认的 test 数据库，导致权限错误
+mongodb://user:pass@host:27019/?authSource=admin
+```
+
+✅ 正确：包含数据库名称
+```bash
+mongodb://user:pass@host:27019/bearer_token_service?authSource=admin
+```
 
 ### 1. 账户查询配置 (AccountFetcher)
 

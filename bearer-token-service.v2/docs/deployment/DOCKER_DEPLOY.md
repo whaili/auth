@@ -140,13 +140,37 @@ curl -X POST http://localhost:8080/api/v2/accounts/register \
 
 ## 🏭 生产部署
 
-### 1. 修改生产配置
+### 部署模式选择
+
+生产环境支持两种部署模式：
+
+#### 模式 1: 本地 MongoDB (docker-compose.yml --profile local)
+
+适用于：开发、测试、小规模部署
+
+```bash
+# 使用内置 MongoDB 容器
+docker-compose --profile local up -d
+```
+
+#### 模式 2: 外部 MongoDB 副本集 (docker-compose.yml --profile production)
+
+适用于：**生产环境（推荐）**，支持 1主2备副本集
+
+```bash
+# 使用外部 MongoDB 副本集
+docker-compose --profile production up -d
+```
+
+---
+
+### 1. 本地 MongoDB 部署
 
 编辑 `.env` 文件:
 
 ```bash
 # ========================================
-# 生产环境配置
+# 本地模式配置
 # ========================================
 
 # 版本控制
@@ -170,6 +194,122 @@ HMAC_TIMESTAMP_TOLERANCE=10m
 
 # 自定义端口（如果需要）
 HOST_PORT=18080
+```
+
+### 2. 外部 MongoDB 副本集部署
+
+#### 2.1 配置环境变量
+
+复制生产配置模板:
+
+```bash
+cd /opt/src/auth/bearer-token-service.v2/dist/deploy
+cp .env.production .env
+vim .env
+```
+
+**必须修改的配置项**:
+
+```bash
+# ========================================
+# 外部 MongoDB 副本集配置
+# ========================================
+
+# MongoDB 副本集连接字符串（必填）
+# 格式: mongodb://用户名:密码@主节点:端口,从节点1:端口,从节点2:端口/数据库名?replicaSet=副本集名&authSource=admin
+MONGO_URI=mongodb://bearer_token_wr:YOUR_PASSWORD@10.70.65.39:27019,10.70.65.40:27019,10.70.65.41:27019/bearer_token_service?replicaSet=rs0&authSource=admin
+
+# 外部账户 API（如果使用）
+EXTERNAL_ACCOUNT_API_URL=https://account-service.qiniu.com
+EXTERNAL_ACCOUNT_API_TOKEN=your_api_token_here
+
+# 索引创建控制（外部 MongoDB 必须设置为 true）
+SKIP_INDEX_CREATION=true
+```
+
+**副本集连接字符串说明**:
+
+| 参数 | 说明 | 示例 |
+|------|------|------|
+| 用户名:密码 | 数据库凭据 | `bearer_token_wr:password123` |
+| 主节点,从节点1,从节点2 | 所有副本集节点地址 | `host1:27019,host2:27019,host3:27019` |
+| 数据库名 | **必须指定** | `/bearer_token_service` |
+| replicaSet | 副本集名称 | `?replicaSet=rs0` |
+| authSource | 认证数据库 | `&authSource=admin` |
+
+**推荐的完整配置（高可用）**:
+
+```bash
+MONGO_URI=mongodb://user:pass@host1:27019,host2:27019,host3:27019/dbname?replicaSet=rs0&authSource=admin&readPreference=primaryPreferred&retryWrites=true&w=majority&maxPoolSize=50
+```
+
+参数说明：
+- `readPreference=primaryPreferred`: 优先读主节点，主节点不可用时读从节点
+- `retryWrites=true`: 自动重试写入操作
+- `w=majority`: 写入确认级别（多数节点确认）
+- `maxPoolSize=50`: 连接池大小
+
+#### 2.2 初始化数据库索引
+
+**重要**: 使用外部 MongoDB 时，必须先执行数据库初始化！
+
+```bash
+# 安装 mongosh（如果未安装）
+# Ubuntu/Debian
+sudo apt install mongodb-mongosh
+
+# CentOS/RHEL
+sudo yum install mongodb-mongosh
+
+# 执行初始化脚本
+cd /opt/src/auth/bearer-token-service.v2/dist/deploy
+./scripts/init/init-db.sh
+```
+
+**预期输出**:
+
+```
+========================================
+Bearer Token Service V2 - 数据库初始化
+========================================
+
+🌐 检测到外部 MongoDB 配置
+📋 配置信息:
+   MONGO_URI: mongodb://***:***@10.70.65.39:27019,...
+
+✅ 找到 mongosh 命令
+✅ MongoDB 连接成功
+🚀 开始创建索引...
+
+========================================
+✅ 数据库初始化成功！
+========================================
+```
+
+#### 2.3 启动服务
+
+```bash
+# 启动生产模式（使用外部 MongoDB）
+docker-compose --profile production up -d
+
+# 查看服务状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f bearer-token-service
+```
+
+#### 2.4 验证部署
+
+```bash
+# 健康检查
+curl http://localhost/health
+
+# 预期响应
+{"status":"ok"}
+
+# 查看服务日志确认使用外部 MongoDB
+docker-compose logs bearer-token-service | grep "Connected to MongoDB"
 ```
 
 ### 2. 修改 Docker Compose（生产增强）
