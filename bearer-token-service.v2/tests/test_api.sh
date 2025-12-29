@@ -144,7 +144,7 @@ main() {
     echo -e "${GREEN}========================================${NC}"
     echo -e "${GREEN}🎉 All Tests Passed!${NC}"
     echo -e "${GREEN}  - HMAC Authentication ✓${NC}"
-    echo -e "${GREEN}  - Qstub Authentication ✓${NC}"
+    echo -e "${GREEN}  - QiniuStub Authentication ✓${NC}"
     echo -e "${GREEN}========================================${NC}"
 }
 
@@ -452,27 +452,22 @@ test_delete_token() {
 test_qstub_create_account() {
     log_info "Creating Qstub authentication context..."
 
-    # 构建 Qstub Token
-    # Qstub Token 格式: Base64({"uid":"12345","email":"user@qiniu.com","name":"User Name"})
-    QSTUB_UID="12345"
-    QSTUB_EMAIL="qstub-test@qiniu.com"
-    QSTUB_NAME="Qstub Test User"
-
-    USER_INFO="{\"uid\":\"$QSTUB_UID\",\"email\":\"$QSTUB_EMAIL\",\"name\":\"$QSTUB_NAME\"}"
-    QSTUB_TOKEN=$(echo -n "$USER_INFO" | base64 -w 0)
+    # 构建 QiniuStub 认证
+    # QiniuStub 格式: QiniuStub uid={UID}&ut={USER_TYPE}
+    QSTUB_UID="1369077332"
+    QSTUB_UTYPE="1"
+    QSTUB_AUTH="QiniuStub uid=${QSTUB_UID}&ut=${QSTUB_UTYPE}"
 
     # 导出全局变量
-    export QSTUB_TOKEN
+    export QSTUB_AUTH
     export QSTUB_UID
-    export QSTUB_EMAIL
 
     log_success "Qstub authentication context created"
     log_info "Qstub UID: $QSTUB_UID"
-    log_info "Qstub Email: $QSTUB_EMAIL"
-    log_info "Qstub Token: ${QSTUB_TOKEN:0:30}..."
+    log_info "Qstub Auth: $QSTUB_AUTH"
 
     # 保存到文件
-    echo "QSTUB_TOKEN=$QSTUB_TOKEN" >> /tmp/v2_test_credentials.env
+    echo "QSTUB_AUTH=$QSTUB_AUTH" >> /tmp/v2_test_credentials.env
     echo "QSTUB_UID=$QSTUB_UID" >> /tmp/v2_test_credentials.env
 }
 
@@ -480,7 +475,7 @@ test_qstub_create_token() {
     log_info "Creating Bearer Token using Qstub authentication..."
 
     response=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/api/v2/tokens" \
-        -H "Authorization: Bearer $QSTUB_TOKEN" \
+        -H "Authorization: $QSTUB_AUTH" \
         -H "Content-Type: application/json" \
         -d '{
             "description": "Qstub test token",
@@ -521,7 +516,7 @@ test_qstub_list_tokens() {
     log_info "Listing tokens using Qstub authentication..."
 
     response=$(curl -s -w "\n%{http_code}" -X GET "$BASE_URL/api/v2/tokens?limit=10" \
-        -H "Authorization: Bearer $QSTUB_TOKEN")
+        -H "Authorization: $QSTUB_AUTH")
 
     http_code=$(echo "$response" | tail -n1)
     body=$(echo "$response" | sed '$d')
@@ -542,7 +537,7 @@ test_qstub_get_token() {
     log_info "Getting token info using Qstub authentication..."
 
     response=$(curl -s -w "\n%{http_code}" -X GET "$BASE_URL/api/v2/tokens/$QSTUB_TOKEN_ID" \
-        -H "Authorization: Bearer $QSTUB_TOKEN")
+        -H "Authorization: $QSTUB_AUTH")
 
     http_code=$(echo "$response" | tail -n1)
     body=$(echo "$response" | sed '$d')
@@ -562,7 +557,7 @@ test_qstub_update_token() {
 
     # 禁用 Token
     response=$(curl -s -w "\n%{http_code}" -X PUT "$BASE_URL/api/v2/tokens/$QSTUB_TOKEN_ID/status" \
-        -H "Authorization: Bearer $QSTUB_TOKEN" \
+        -H "Authorization: $QSTUB_AUTH" \
         -H "Content-Type: application/json" \
         -d '{"enabled": false}')
 
@@ -575,7 +570,7 @@ test_qstub_update_token() {
         # 重新启用
         log_info "Re-enabling token..."
         response=$(curl -s -w "\n%{http_code}" -X PUT "$BASE_URL/api/v2/tokens/$QSTUB_TOKEN_ID/status" \
-            -H "Authorization: Bearer $QSTUB_TOKEN" \
+            -H "Authorization: $QSTUB_AUTH" \
             -H "Content-Type: application/json" \
             -d '{"enabled": true}')
 
@@ -597,7 +592,7 @@ test_qstub_delete_token() {
     log_info "Deleting token using Qstub authentication..."
 
     response=$(curl -s -w "\n%{http_code}" -X DELETE "$BASE_URL/api/v2/tokens/$QSTUB_TOKEN_ID" \
-        -H "Authorization: Bearer $QSTUB_TOKEN")
+        -H "Authorization: $QSTUB_AUTH")
 
     http_code=$(echo "$response" | tail -n1)
     body=$(echo "$response" | sed '$d')

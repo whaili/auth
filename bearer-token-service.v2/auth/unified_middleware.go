@@ -2,8 +2,6 @@ package auth
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -35,9 +33,12 @@ type QiniuUIDMapper interface {
 
 // QstubUserInfo 七牛 Qstub 用户信息
 type QstubUserInfo struct {
-	UID   string `json:"uid"`
-	Email string `json:"email,omitempty"`
-	Name  string `json:"name,omitempty"`
+	UID     string `json:"uid"`             // 必需: 用户ID
+	Utype   uint32 `json:"ut"`              // 可选: 用户类型
+	Appid   uint64 `json:"app,omitempty"`   // 可选: 应用ID(未使用)
+	Access  string `json:"ak,omitempty"`    // 可选: AccessKey(未使用)
+	EndUser string `json:"eu,omitempty"`    // 可选: 最终用户(未使用)
+	Email   string `json:"email,omitempty"` // 可选: 邮箱
 }
 
 // NewUnifiedAuthMiddleware 创建统一认证中间件
@@ -57,7 +58,7 @@ func NewUnifiedAuthMiddleware(
 //
 // 认证优先级：
 // 1. 如果存在 X-Qiniu-Date 头，使用 HMAC 签名认证
-// 2. 如果 Authorization 以 "Bearer " 开头，尝试 Qstub Token 认证
+// 2. 如果 Authorization 以 "QiniuStub " 开头，使用 QiniuStub 认证（URL 参数格式）
 // 3. 否则返回 401
 func (m *UnifiedAuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -71,13 +72,13 @@ func (m *UnifiedAuthMiddleware) Authenticate(next http.HandlerFunc) http.Handler
 			return
 		}
 
-		// 策略 2: Qstub Bearer Token 认证
-		if strings.HasPrefix(authHeader, "Bearer ") {
+		// 策略 2: QiniuStub 认证（URL 参数格式）
+		if strings.HasPrefix(authHeader, "QiniuStub ") {
 			m.authenticateQstub(w, r, next)
 			return
 		}
 
-		// 策略 3: 如果是 QINIU 格式但没有时间戳，也尝试 HMAC
+		// 策略 3: 如果是 QINIU 格式但没有时间戳，提示错误
 		if strings.HasPrefix(authHeader, "QINIU ") {
 			m.respondError(w, http.StatusUnauthorized, "missing X-Qiniu-Date header for HMAC authentication")
 			return
@@ -127,34 +128,64 @@ func (m *UnifiedAuthMiddleware) authenticateQstub(w http.ResponseWriter, r *http
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
-// parseQstubToken 解析 Qstub Bearer Token
+// parseQstubToken 解析 QiniuStub Token
+// 格式: "QiniuStub uid=12345&ut=1"
 func (m *UnifiedAuthMiddleware) parseQstubToken(authHeader string) (*QstubUserInfo, error) {
-	// 移除 "Bearer " 前缀
-	token := strings.TrimPrefix(authHeader, "Bearer ")
-	token = strings.TrimSpace(token)
+	if !strings.HasPrefix(authHeader, "QiniuStub ") {
+		return nil, fmt.Errorf("invalid qstub token format")
+	}
+	return m.parseQstubURLParams(authHeader)
+}
 
-	if token == "" {
-		return nil, fmt.Errorf("empty token")
+// parseQstubURLParams 解析 URL 参数格式的 QiniuStub Token
+// 例如: "QiniuStub uid=12345&ut=1&app=1"
+func (m *UnifiedAuthMiddleware) parseQstubURLParams(authHeader string) (*QstubUserInfo, error) {
+	// 移除 "QiniuStub " 前缀
+	params := strings.TrimPrefix(authHeader, "QiniuStub ")
+	params = strings.TrimSpace(params)
+
+	if params == "" {
+		return nil, fmt.Errorf("empty qstub params")
 	}
 
-	// Base64 解码
-	decoded, err := base64.StdEncoding.DecodeString(token)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode token: %w", err)
-	}
+	// 解析 URL 参数
+	userInfo := &QstubUserInfo{}
+	pairs := strings.Split(params, "&")
 
-	// JSON 反序列化
-	var userInfo QstubUserInfo
-	if err := json.Unmarshal(decoded, &userInfo); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal user info: %w", err)
+	for _, pair := range pairs {
+		kv := strings.SplitN(pair, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+
+		key, value := kv[0], kv[1]
+		switch key {
+		case "uid":
+			userInfo.UID = value
+		case "ut":
+			if ut, err := strconv.ParseUint(value, 10, 32); err == nil {
+				userInfo.Utype = uint32(ut)
+			}
+		case "app":
+			if app, err := strconv.ParseUint(value, 10, 64); err == nil {
+				userInfo.Appid = app
+			}
+		case "ak":
+			userInfo.Access = value
+		case "eu":
+			userInfo.EndUser = value
+		case "email":
+			userInfo.Email = value
+		}
 	}
 
 	if userInfo.UID == "" {
 		return nil, fmt.Errorf("uid is empty")
 	}
 
-	return &userInfo, nil
+	return userInfo, nil
 }
+
 
 // respondError 返回错误响应
 func (m *UnifiedAuthMiddleware) respondError(w http.ResponseWriter, statusCode int, message string) {

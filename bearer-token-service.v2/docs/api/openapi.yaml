@@ -14,8 +14,10 @@ info:
     2. 使用 SecretKey 生成 HMAC-SHA256 签名
     3. 构造 Authorization Header: `QINIU <ACCESS_KEY>:<SIGNATURE>`
 
-    ### Qstub 认证
-    七牛内部服务使用 Qstub Token 进行认证。
+    ### QiniuStub 认证
+    七牛内部服务使用 QiniuStub 认证。
+
+    格式: `QiniuStub uid={用户ID}&ut={用户类型}`
   version: 2.0.0
   contact:
     name: API Support
@@ -590,12 +592,13 @@ components:
         需要同时提供 X-Qiniu-Date 头部
 
     QstubAuth:
-      type: http
-      scheme: bearer
+      type: apiKey
+      in: header
+      name: Authorization
       description: |
-        Qstub 认证（七牛内部服务）
+        QiniuStub 认证（七牛内部服务）
 
-        格式: `Bearer <QSTUB_TOKEN>`
+        格式: `QiniuStub uid=1369077332&ut=1`
 
     BearerAuth:
       type: http

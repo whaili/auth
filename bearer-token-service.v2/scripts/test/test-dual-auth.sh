@@ -1,6 +1,6 @@
 #!/bin/bash
 # 双认证模式测试脚本
-# 测试 HMAC 和 Qstub Bearer Token 两种认证方式
+# 测试 HMAC 和 QiniuStub 两种认证方式
 
 set -e
 
@@ -18,26 +18,28 @@ echo "=========================================="
 echo ""
 
 # ==========================================
-# 测试 1: Qstub Bearer Token 认证
+# 测试 1: QiniuStub 认证
 # ==========================================
-echo -e "${BLUE}测试 1: Qstub Bearer Token 认证${NC}"
+echo -e "${BLUE}测试 1: QiniuStub 认证${NC}"
 echo "----------------------------------------"
 
-# 构建 Qstub Token
-USER_INFO='{"uid":"12345","email":"testuser@qiniu.com","name":"Test User"}'
-QSTUB_TOKEN=$(echo -n "$USER_INFO" | base64)
+# 构建 QiniuStub 认证头
+UID="1369077332"
+UTYPE="1"
+QSTUB_AUTH="QiniuStub uid=${UID}&ut=${UTYPE}"
 
-echo "用户信息: $USER_INFO"
-echo "Qstub Token: $QSTUB_TOKEN"
+echo "用户 UID: $UID"
+echo "用户类型: $UTYPE"
+echo "认证头: $QSTUB_AUTH"
 echo ""
 
 # 创建 Token
 echo "创建 Bearer Token..."
 RESPONSE=$(curl -s -X POST "$BASE_URL/api/v2/tokens" \
-  -H "Authorization: Bearer $QSTUB_TOKEN" \
+  -H "Authorization: $QSTUB_AUTH" \
   -H "Content-Type: application/json" \
   -d '{
-    "description": "Qstub test token",
+    "description": "QiniuStub test token",
     "scope": ["storage:read", "storage:write"],
     "expires_in_seconds": 3600
   }')
@@ -46,20 +48,21 @@ echo "响应: $RESPONSE"
 
 # 检查是否成功
 if echo "$RESPONSE" | grep -q '"token_id"'; then
-    echo -e "${GREEN}✓ Qstub 认证测试通过${NC}"
+    echo -e "${GREEN}✓ QiniuStub 认证测试通过${NC}"
     TOKEN_ID=$(echo "$RESPONSE" | grep -o '"token_id":"[^"]*"' | cut -d'"' -f4)
     ACCOUNT_ID=$(echo "$RESPONSE" | grep -o '"account_id":"[^"]*"' | cut -d'"' -f4)
     echo "  Token ID: $TOKEN_ID"
     echo "  Account ID: $ACCOUNT_ID"
 
     # 验证 account_id 格式是否为 qiniu_{uid}
-    if [ "$ACCOUNT_ID" = "qiniu_12345" ]; then
+    EXPECTED_ACCOUNT_ID="qiniu_${UID}"
+    if [ "$ACCOUNT_ID" = "$EXPECTED_ACCOUNT_ID" ]; then
         echo -e "${GREEN}✓ Account ID 格式正确 (qiniu_{uid})${NC}"
     else
-        echo -e "${RED}✗ Account ID 格式错误，期望: qiniu_12345，实际: $ACCOUNT_ID${NC}"
+        echo -e "${RED}✗ Account ID 格式错误，期望: $EXPECTED_ACCOUNT_ID，实际: $ACCOUNT_ID${NC}"
     fi
 else
-    echo -e "${RED}✗ Qstub 认证测试失败${NC}"
+    echo -e "${RED}✗ QiniuStub 认证测试失败${NC}"
     echo "错误信息: $RESPONSE"
 fi
 
@@ -133,13 +136,13 @@ fi
 echo ""
 
 # ==========================================
-# 测试 3: 列出 Tokens（使用 Qstub 认证）
+# 测试 3: 列出 Tokens（使用 QiniuStub 认证）
 # ==========================================
-echo -e "${BLUE}测试 3: 列出 Tokens (Qstub 认证)${NC}"
+echo -e "${BLUE}测试 3: 列出 Tokens (QiniuStub 认证)${NC}"
 echo "----------------------------------------"
 
 LIST_RESPONSE=$(curl -s -X GET "$BASE_URL/api/v2/tokens?limit=10" \
-  -H "Authorization: Bearer $QSTUB_TOKEN")
+  -H "Authorization: $QSTUB_AUTH")
 
 echo "响应: $LIST_RESPONSE"
 
@@ -160,7 +163,7 @@ echo "=========================================="
 echo -e "${BLUE}测试总结${NC}"
 echo "=========================================="
 echo ""
-echo "✓ 支持 Qstub Bearer Token 认证"
+echo "✓ 支持 QiniuStub 认证（URL 参数格式）"
 echo "✓ 支持 HMAC 签名认证"
 echo "✓ 两种认证方式互不干扰"
 echo "✓ Account ID 自动映射（qiniu_{uid}）"

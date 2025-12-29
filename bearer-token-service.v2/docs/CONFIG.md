@@ -151,7 +151,7 @@ HTTP/1.1 404 Not Found
 
 ### 2. 七牛 UID 映射配置 (QiniuUIDMapper)
 
-控制 Qstub Bearer Token 认证时如何将七牛 UID 映射为系统的 account_id。
+控制 QiniuStub 认证时如何将七牛 UID 映射为系统的 account_id。
 
 #### 模式 1: 简单模式（默认）
 
@@ -188,7 +188,7 @@ export QINIU_UID_AUTO_CREATE=true  # 或 false
 
 **工作原理**：
 ```
-Qstub 请求 → 解析 UID = 12345
+QiniuStub 请求 → 解析 UID = 12345
            ↓
 查询 MongoDB: SELECT account_id FROM accounts WHERE qiniu_uid = 12345
            ↓
@@ -239,7 +239,7 @@ go run cmd/server/main.go
 ```
 ✅ Using Local MongoDB AccountFetcher
 ✅ Using SimpleQiniuUIDMapper (format: qiniu_{uid})
-✅ Unified authentication middleware initialized (HMAC + Qstub, tolerance=15m0s)
+✅ Unified authentication middleware initialized (HMAC + QiniuStub, tolerance=15m0s)
 ```
 
 ---
@@ -270,7 +270,7 @@ go run cmd/server/main.go
 ```
 ✅ Using External AccountFetcher (API: https://account-service.qiniu.com)
 ✅ Using DatabaseQiniuUIDMapper (autoCreate=false)
-✅ Unified authentication middleware initialized (HMAC + Qstub, tolerance=10m0s)
+✅ Unified authentication middleware initialized (HMAC + QiniuStub, tolerance=10m0s)
 ```
 
 ---
@@ -283,7 +283,7 @@ export ACCOUNT_FETCHER_MODE=external
 export EXTERNAL_ACCOUNT_API_URL=https://account-service.qiniu.com
 export EXTERNAL_ACCOUNT_API_TOKEN=your_token
 
-# Qstub 认证使用简单映射（快速）
+# QiniuStub 认证使用简单映射（快速）
 export QINIU_UID_MAPPER_MODE=simple
 
 go run cmd/server/main.go
@@ -291,7 +291,7 @@ go run cmd/server/main.go
 
 **适用于**：
 - HMAC 用户来自统一账户系统
-- Qstub 用户是临时/测试用户，不需要持久化
+- QiniuStub 用户是临时/测试用户，不需要持久化
 
 ---
 
@@ -328,7 +328,7 @@ go run cmd/server/main.go
 ✅ Handlers initialized
 ✅ Using External AccountFetcher (API: https://account-service.qiniu.com)
 ✅ Using DatabaseQiniuUIDMapper (autoCreate=false)
-✅ Unified authentication middleware initialized (HMAC + Qstub, tolerance=10m0s)
+✅ Unified authentication middleware initialized (HMAC + QiniuStub, tolerance=10m0s)
 ✅ Routes configured
 🌐 Server starting on http://localhost:8080
 ✨ Bearer Token Service V2 is ready!

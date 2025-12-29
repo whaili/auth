@@ -6,10 +6,10 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                         外部请求                                  │
 │  ┌──────────────────────┐      ┌────────────────────────────┐   │
-│  │  HMAC 签名请求         │      │  Qstub Bearer Token 请求   │   │
+│  │  HMAC 签名请求         │      │  QiniuStub 认证请求        │   │
 │  │                        │      │                            │   │
 │  │  Authorization:        │      │  Authorization:            │   │
-│  │  QINIU {AK}:{Sig}      │      │  Bearer {base64_token}     │   │
+│  │  QINIU {AK}:{Sig}      │      │  QiniuStub uid=123&ut=1    │   │
 │  │  X-Qiniu-Date: ...     │      │                            │   │
 │  └──────────────────────┘      └────────────────────────────┘   │
 └─────────────┬───────────────────────────────┬────────────────────┘
@@ -20,10 +20,10 @@
 │            （统一认证中间件 - 自动识别认证方式）                     │
 │                                                                 │
 │  ┌──────────────────────────┐   ┌───────────────────────────┐  │
-│  │  HMAC 认证分支             │   │  Qstub 认证分支            │  │
+│  │  HMAC 认证分支             │   │  QiniuStub 认证分支        │  │
 │  │                            │   │                           │  │
-│  │  1. 解析 AccessKey         │   │  1. Base64 解码            │  │
-│  │  2. 查询账户信息            │   │  2. JSON 反序列化          │  │
+│  │  1. 解析 AccessKey         │   │  1. 解析 URL 参数          │  │
+│  │  2. 查询账户信息            │   │  2. 提取 UID              │  │
 │  │  3. 验证签名                │   │  3. 映射 UID → account_id │  │
 │  │  4. 注入 account_id        │   │  4. 注入 account_id       │  │
 │  └──────────────────────────┘   └───────────────────────────┘  │
@@ -82,18 +82,16 @@
    └─ 从 Context 提取 account_id → 调用 Service
 ```
 
-### Qstub Bearer Token 认证流程
+### QiniuStub 认证流程
 
 ```
 1. 客户端
-   ├─ 构建用户信息: {"uid":"12345","email":"user@qiniu.com"}
-   ├─ Base64 编码: eyJ1aWQiOiIxMjM0NSIsImVtYWlsIjoidXNlckBxaW5pdS5jb20ifQ==
-   └─ 发送请求: Authorization: Bearer {token}
+   └─ 发送请求: Authorization: QiniuStub uid=1369077332&ut=1
 
 2. 服务端 (UnifiedAuthMiddleware)
-   ├─ 检测到 Authorization: Bearer → Qstub 认证分支
-   ├─ Base64 解码
-   ├─ JSON 反序列化 → QstubUserInfo{UID, Email}
+   ├─ 检测到 Authorization: QiniuStub → QiniuStub 认证分支
+   ├─ 解析 URL 参数
+   ├─ 提取 UID → QstubUserInfo{UID, Utype, Email...}
    ├─ 调用 QiniuUIDMapper.GetAccountIDByQiniuUID(uid)
    │   └─ 简单模式: 直接返回 "qiniu_{uid}"
    │   └─ 数据库模式: 查询或创建账户映射
@@ -123,8 +121,8 @@ func (m *UnifiedAuthMiddleware) Authenticate(next http.HandlerFunc) http.Handler
 ```go
 if timestampHeader != "" {
     // HMAC 认证（优先级最高）
-} else if strings.HasPrefix(authHeader, "Bearer ") {
-    // Qstub 认证
+} else if strings.HasPrefix(authHeader, "QiniuStub ") {
+    // QiniuStub 认证
 } else {
     // 不支持的认证方式
 }
@@ -207,13 +205,13 @@ DatabaseQiniuUIDMapper:
 3. **SecretKey 保护**：仅存储加密后的 SecretKey
 4. **账户状态检查**：禁用账户无法通过认证
 
-### Qstub Token 安全措施
+### QiniuStub 安全措施
 
-1. **Base64 编码**：防止传输过程中的编码问题
+1. **格式验证**：验证 URL 参数格式
 2. **UID 验证**：确保 UID 非空且有效
 3. **账户映射**：可选的账户验证和状态检查
 
-**注意**：Qstub 认证适合**内部服务**，不建议用于**公网暴露的 API**。
+**注意**：QiniuStub 认证适合**内部服务**，不建议用于**公网暴露的 API**。
 
 ---
 
@@ -234,7 +232,7 @@ func (m *UnifiedAuthMiddleware) authenticateJWT(w, r, next) {
 2. 在 `Authenticate` 方法中添加新分支：
 ```go
 if strings.HasPrefix(authHeader, "Bearer ") {
-    // 判断是 JWT 还是 Qstub
+    // 判断是 JWT 还是 QiniuStub
     if isJWT(authHeader) {
         m.authenticateJWT(w, r, next)
     } else {
@@ -276,14 +274,13 @@ func CustomAuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
 - 缓存账户信息（Redis）：减少数据库查询
 - 使用连接池：提高数据库访问性能
 
-### Qstub 认证性能
+### QiniuStub 认证性能
 
-- **Base64 解码**：~0.01ms
-- **JSON 反序列化**：~0.05ms
+- **URL 参数解析**：~0.01ms
 - **UID 映射**（简单模式）：~0.001ms（直接字符串拼接）
-- **总耗时**：~0.1ms
+- **总耗时**：~0.01ms
 
-**优势**：比 HMAC 快 50-100 倍！
+**优势**：比 HMAC 快 500 倍！
 
 ---
 

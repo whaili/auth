@@ -39,9 +39,9 @@ Signature = Base64(HMAC-SHA256(SecretKey, StringToSign))
 
 ---
 
-### 2. Qstub Bearer Token 认证（七牛内部）
+### 2. QiniuStub 认证（七牛内部）
 
-使用 Base64 编码的用户信息进行认证。
+使用 URL 参数格式的用户信息进行认证。
 
 **适用场景**：
 - 七牛内部服务调用
@@ -50,29 +50,23 @@ Signature = Base64(HMAC-SHA256(SecretKey, StringToSign))
 
 **用户信息格式**：
 
-```json
-{
-  "uid": "12345",
-  "email": "user@example.com",
-  "name": "张三"
-}
+```
+QiniuStub uid={用户ID}&ut={用户类型}&app={应用ID}
 ```
 
-**Token 生成**：
-
-```bash
-# 原始 JSON
-echo '{"uid":"12345","email":"user@qiniu.com"}' | base64
-
-# 输出（示例）
-eyJ1aWQiOiIxMjM0NSIsImVtYWlsIjoidXNlckBxaW5pdS5jb20ifQ==
-```
+**字段说明**：
+- `uid`: **必需** - 七牛用户 ID（字符串）
+- `ut`: 可选 - 用户类型（1=标准用户）
+- `app`: 可选 - 应用 ID（默认为 1）
+- `ak`: 可选 - AccessKey（未使用）
+- `eu`: 可选 - 最终用户（未使用）
+- `email`: 可选 - 用户邮箱
 
 **请求示例**：
 
 ```http
 POST /api/v2/tokens
-Authorization: Bearer eyJ1aWQiOiIxMjM0NSIsImVtYWlsIjoidXNlckBxaW5pdS5jb20ifQ==
+Authorization: QiniuStub uid=1369077332&ut=1
 Content-Type: application/json
 
 {
@@ -91,7 +85,7 @@ Content-Type: application/json
 | 特征 | 认证方式 |
 |------|---------|
 | 有 `X-Qiniu-Date` 头 | HMAC 签名认证 |
-| `Authorization: Bearer <token>` | Qstub Token 认证 |
+| `Authorization: QiniuStub uid=xxx&ut=xxx` | QiniuStub 认证 |
 | `Authorization: QINIU <ak>:<sig>` 但无 `X-Qiniu-Date` | 错误：缺少时间戳 |
 | 其他 | 错误：不支持的认证方式 |
 
@@ -140,17 +134,17 @@ curl -X POST http://localhost:8080/api/v2/tokens \
 
 ---
 
-### 方式 2: Qstub Bearer Token
+### 方式 2: QiniuStub 认证
 
 ```bash
 #!/bin/bash
-# 构建用户信息
-USER_INFO='{"uid":"12345","email":"user@qiniu.com"}'
-QSTUB_TOKEN=$(echo -n "$USER_INFO" | base64)
+# 直接使用 URL 参数格式
+UID="1369077332"
+USER_TYPE="1"  # 1=标准用户
 
 # 发送请求
 curl -X POST http://localhost:8080/api/v2/tokens \
-  -H "Authorization: Bearer ${QSTUB_TOKEN}" \
+  -H "Authorization: QiniuStub uid=${UID}&ut=${USER_TYPE}" \
   -H "Content-Type: application/json" \
   -d '{
     "description": "My dev token",
@@ -286,11 +280,11 @@ hmacMiddleware := auth.NewHMACMiddleware(accountFetcher, 15*time.Minute)
 
 ## 📊 架构对比
 
-| 特性 | HMAC 认证 | Qstub 认证 |
+| 特性 | HMAC 认证 | QiniuStub 认证 |
 |------|---------|-----------|
-| 安全性 | ⭐⭐⭐⭐⭐ 高（加密签名） | ⭐⭐⭐ 中（Base64 编码） |
-| 性能 | ⭐⭐⭐ 中（需计算签名） | ⭐⭐⭐⭐ 好（仅解码） |
-| 集成难度 | ⭐⭐⭐ 中（需签名计算） | ⭐⭐⭐⭐⭐ 易（直接 Base64） |
+| 安全性 | ⭐⭐⭐⭐⭐ 高（加密签名） | ⭐⭐⭐ 中（URL 参数） |
+| 性能 | ⭐⭐⭐ 中（需计算签名） | ⭐⭐⭐⭐⭐ 高（仅解析参数） |
+| 集成难度 | ⭐⭐⭐ 中（需签名计算） | ⭐⭐⭐⭐⭐ 易（直接传参） |
 | 账户管理 | 需要注册账户 | 可选（简单模式免注册） |
 | 适用场景 | 外部客户端 | 内部服务 |
 
@@ -301,7 +295,7 @@ hmacMiddleware := auth.NewHMACMiddleware(accountFetcher, 15*time.Minute)
 Bearer Token Service V2 现在支持**灵活的双认证模式**：
 
 1. ✅ 保留原有 HMAC 签名认证（高安全性）
-2. ✅ 新增 Qstub Bearer Token 认证（快速集成）
+2. ✅ 新增 QiniuStub 认证（快速集成，URL 参数格式）
 3. ✅ 自动识别认证方式（无需配置）
 4. ✅ 支持自定义认证中间件（完全解耦）
 
