@@ -66,7 +66,9 @@ services:
       # 日志持久化
       - ./logs:/app/logs
     networks:
-      - bearer-token-net
+      bearer-token-net:
+        aliases:
+          - backend
     # 端口说明：
     # - 使用 Nginx 时：不需要暴露端口，Nginx 会代理请求
     # - 不使用 Nginx 时：取消下面的注释以直接暴露端口

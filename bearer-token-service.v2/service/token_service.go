@@ -92,6 +92,7 @@ func (s *TokenServiceImpl) ListTokens(ctx context.Context, accountID string, act
 
 	// 转换为摘要格式（隐藏完整 Token）
 	var tokenBriefs []interfaces.TokenBrief
+	now := time.Now()
 	for _, token := range tokens {
 		tokenBriefs = append(tokenBriefs, interfaces.TokenBrief{
 			TokenID:       token.ID,
@@ -102,6 +103,7 @@ func (s *TokenServiceImpl) ListTokens(ctx context.Context, accountID string, act
 			CreatedAt:     token.CreatedAt,
 			ExpiresAt:     token.ExpiresAt,
 			IsActive:      token.IsActive,
+			Status:        calculateTokenStatus(&token, now), // 动态计算状态
 			TotalRequests: token.TotalRequests,
 			LastUsedAt:    token.LastUsedAt,
 		})
@@ -247,4 +249,20 @@ func hideToken(token string) string {
 		bytes[i] = '*'
 	}
 	return string(bytes)
+}
+
+// calculateTokenStatus 计算 Token 的综合状态
+func calculateTokenStatus(token *interfaces.Token, now time.Time) string {
+	// 1. 已停用
+	if !token.IsActive {
+		return interfaces.TokenStatusDisabled
+	}
+
+	// 2. 已过期（ExpiresAt 不为零值且已过期）
+	if !token.ExpiresAt.IsZero() && token.ExpiresAt.Before(now) {
+		return interfaces.TokenStatusExpired
+	}
+
+	// 3. 正常（未过期且已激活）
+	return interfaces.TokenStatusNormal
 }

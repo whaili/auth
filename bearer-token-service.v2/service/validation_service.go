@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
 	"bearer-token-service.v1/v2/interfaces"
@@ -76,16 +78,33 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 	}
 
 	// 5. 验证通过，返回 Token 信息
+	tokenInfo := &interfaces.TokenInfo{
+		TokenID:  token.ID,
+		Scope:    token.Scope,
+		IsActive: token.IsActive,
+	}
+
+	// 处理时间字段（避免零值时间）
+	if !token.ExpiresAt.IsZero() {
+		tokenInfo.ExpiresAt = &token.ExpiresAt
+	}
+	if !token.LastUsedAt.IsZero() {
+		tokenInfo.LastUsedAt = &token.LastUsedAt
+	}
+
+	// 根据 account_id 格式判断用户类型
+	if uid, isQiniuStub := extractUIDFromAccountID(token.AccountID); isQiniuStub {
+		// QiniuStub 用户：返回 UID
+		tokenInfo.UID = uid
+	} else {
+		// HMAC 用户：返回 AccountID
+		tokenInfo.AccountID = token.AccountID
+	}
+
 	return &interfaces.TokenValidateResponse{
-		Valid:   true,
-		Message: "Token is valid",
-		TokenInfo: &interfaces.TokenInfo{
-			TokenID:   token.ID,
-			AccountID: token.AccountID,
-			Scope:     token.Scope,
-			IsActive:  token.IsActive,
-			ExpiresAt: token.ExpiresAt,
-		},
+		Valid:           true,
+		Message:         "Token is valid",
+		TokenInfo:       tokenInfo,
 		PermissionCheck: permissionCheck,
 	}, nil
 }
@@ -109,4 +128,23 @@ func (s *ValidationServiceImpl) RecordTokenUsage(ctx context.Context, tokenValue
 	go s.tokenRepo.IncrementUsage(context.Background(), token.ID)
 
 	return nil
+}
+
+// extractUIDFromAccountID 从 account_id 中提取 UID
+// 如果是 QiniuStub 用户（格式: qiniu_{uid}），返回 (uid, true)
+// 否则返回 (0, false)
+func extractUIDFromAccountID(accountID string) (uint32, bool) {
+	// 检查是否是 qiniu_ 前缀
+	if !strings.HasPrefix(accountID, "qiniu_") {
+		return 0, false
+	}
+
+	// 提取 UID 部分
+	uidStr := strings.TrimPrefix(accountID, "qiniu_")
+	uid, err := strconv.ParseUint(uidStr, 10, 32)
+	if err != nil {
+		return 0, false
+	}
+
+	return uint32(uid), true
 }

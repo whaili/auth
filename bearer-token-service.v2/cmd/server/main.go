@@ -97,6 +97,7 @@ func main() {
 	accountService := service.NewAccountService(accountRepo, auditRepo)
 	tokenService := service.NewTokenService(tokenRepo, auditRepo)
 	validationService := service.NewValidationService(tokenRepo)
+	permissionService := service.NewPermissionService()
 	_ = service.NewAuditService(auditRepo) // 预留用于未来的审计日志查询
 
 	log.Println("✅ Services initialized")
@@ -107,6 +108,7 @@ func main() {
 	accountHandler := handlers.NewAccountHandler(accountService)
 	tokenHandler := handlers.NewTokenHandler(tokenService)
 	validationHandler := handlers.NewValidationHandler(validationService)
+	permissionHandler := handlers.NewPermissionHandler(permissionService)
 
 	log.Println("✅ Handlers initialized")
 
@@ -188,6 +190,9 @@ func main() {
 
 	// Token 验证（使用 Bearer Token 认证）
 	router.HandleFunc("/api/v2/validate", validationHandler.ValidateToken).Methods("POST")
+
+	// 权限列表（公开接口，无需认证）
+	router.HandleFunc("/api/v2/permissions", permissionHandler.GetAllPermissions).Methods("GET")
 
 	// 审计日志（需要 HMAC 认证）
 	// TODO: 实现 AuditHandler

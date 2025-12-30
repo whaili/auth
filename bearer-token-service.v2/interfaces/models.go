@@ -125,6 +125,7 @@ type TokenBrief struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	ExpiresAt     time.Time  `json:"expires_at,omitempty"`
 	IsActive      bool       `json:"is_active"`
+	Status        string     `json:"status"` // Token 综合状态：normal=正常，expired=已过期，disabled=已停用
 	TotalRequests int64      `json:"total_requests"`
 	LastUsedAt    time.Time  `json:"last_used_at,omitempty"`
 }
@@ -150,11 +151,13 @@ type TokenValidateResponse struct {
 
 // TokenInfo Token 基本信息（用于验证响应）
 type TokenInfo struct {
-	TokenID   string    `json:"token_id"`
-	AccountID string    `json:"account_id"`
-	Scope     []string  `json:"scope"`
-	IsActive  bool      `json:"is_active"`
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	TokenID    string     `json:"token_id"`
+	AccountID  string     `json:"account_id,omitempty"`  // HMAC 用户使用
+	UID        uint32     `json:"uid,omitempty"`         // QiniuStub 用户使用（从 account_id 提取）
+	Scope      []string   `json:"scope"`
+	IsActive   bool       `json:"is_active"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`  // nil 表示永不过期
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"` // nil 表示从未使用
 }
 
 // PermissionCheckResult 权限检查结果
@@ -203,6 +206,11 @@ const (
 	// Account Status
 	AccountStatusActive    = "active"
 	AccountStatusSuspended = "suspended"
+
+	// Token Status
+	TokenStatusNormal   = "normal"   // 正常（未过期且已激活）
+	TokenStatusExpired  = "expired"  // 已过期
+	TokenStatusDisabled = "disabled" // 已停用
 
 	// Token Prefix (保持与 V1 兼容)
 	TokenPrefix = "sk-"
