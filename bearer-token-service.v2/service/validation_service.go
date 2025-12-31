@@ -132,19 +132,20 @@ func (s *ValidationServiceImpl) RecordTokenUsage(ctx context.Context, tokenValue
 
 // extractUIDFromAccountID 从 account_id 中提取 UID
 // 如果是 QiniuStub 用户（格式: qiniu_{uid}），返回 (uid, true)
-// 否则返回 (0, false)
-func extractUIDFromAccountID(accountID string) (uint32, bool) {
+// 否则返回 ("", false)
+func extractUIDFromAccountID(accountID string) (string, bool) {
 	// 检查是否是 qiniu_ 前缀
 	if !strings.HasPrefix(accountID, "qiniu_") {
-		return 0, false
+		return "", false
 	}
 
 	// 提取 UID 部分
 	uidStr := strings.TrimPrefix(accountID, "qiniu_")
-	uid, err := strconv.ParseUint(uidStr, 10, 32)
+	// 验证 UID 是否是有效的数字
+	_, err := strconv.ParseUint(uidStr, 10, 32)
 	if err != nil {
-		return 0, false
+		return "", false
 	}
 
-	return uint32(uid), true
+	return uidStr, true
 }

@@ -153,7 +153,7 @@ type TokenValidateResponse struct {
 type TokenInfo struct {
 	TokenID    string     `json:"token_id"`
 	AccountID  string     `json:"account_id,omitempty"`  // HMAC 用户使用
-	UID        uint32     `json:"uid,omitempty"`         // QiniuStub 用户使用（从 account_id 提取）
+	UID        string     `json:"uid,omitempty"`         // QiniuStub 用户使用（从 account_id 提取）
 	Scope      []string   `json:"scope"`
 	IsActive   bool       `json:"is_active"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`  // nil 表示永不过期

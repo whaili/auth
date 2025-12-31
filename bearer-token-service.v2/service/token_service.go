@@ -97,7 +97,7 @@ func (s *TokenServiceImpl) ListTokens(ctx context.Context, accountID string, act
 	for _, token := range tokens {
 		brief := interfaces.TokenBrief{
 			TokenID:       token.ID,
-			TokenPreview:  hideToken(token.Token), // 隐藏部分 Token
+			TokenPreview:  token.Token, // hideToken(token.Token), // 隐藏部分 Token - 已注释，返回明文
 			Description:   token.Description,
 			Scope:         token.Scope,
 			RateLimit:     token.RateLimit,
@@ -141,8 +141,8 @@ func (s *TokenServiceImpl) GetTokenInfo(ctx context.Context, accountID string, t
 		return nil, errors.New("permission denied: token does not belong to this account")
 	}
 
-	// 隐藏完整 Token
-	token.Token = hideToken(token.Token)
+	// 隐藏完整 Token - 已注释，返回明文
+	// token.Token = hideToken(token.Token)
 
 	return token, nil
 }
