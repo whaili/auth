@@ -7,7 +7,7 @@ info:
     ## 认证方式
 
     ### HMAC 签名认证
-    所有账户管理和 Token 管理 API 都需要使用 HMAC-SHA256 签名认证。
+    Token 管理 API 需要使用 HMAC-SHA256 签名认证。
 
     #### 签名步骤
     1. 构建待签名字符串: `<HTTP_METHOD>\n<URI_PATH>\n<TIMESTAMP>\n<REQUEST_BODY>`
@@ -31,8 +31,6 @@ servers:
     description: 生产环境
 
 tags:
-  - name: 账户管理
-    description: 账户注册、信息查询、密钥管理
   - name: Token 管理
     description: Bearer Token 的创建、查询、更新、删除
   - name: Token 验证
@@ -60,118 +58,6 @@ paths:
                   status:
                     type: string
                     example: ok
-
-  /api/v2/accounts/register:
-    post:
-      summary: 注册账户
-      description: 创建新的租户账户并获取 AccessKey/SecretKey
-      tags:
-        - 账户管理
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required:
-                - email
-                - company
-                - password
-              properties:
-                email:
-                  type: string
-                  format: email
-                  description: 邮箱地址
-                  example: user@example.com
-                company:
-                  type: string
-                  description: 公司名称
-                  example: Example Inc
-                password:
-                  type: string
-                  format: password
-                  description: 密码
-                  example: securePassword123
-      responses:
-        '201':
-          description: 账户注册成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  account_id:
-                    type: string
-                    example: acc_1a2b3c4d5e6f
-                  email:
-                    type: string
-                    example: user@example.com
-                  company:
-                    type: string
-                    example: Example Inc
-                  access_key:
-                    type: string
-                    example: AK_f8e7d6c5b4a392817a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4
-                  secret_key:
-                    type: string
-                    description: 仅在注册时返回一次，请妥善保存
-                    example: SK_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2
-                  created_at:
-                    type: string
-                    format: date-time
-                    example: 2025-12-25T10:00:00Z
-        '400':
-          $ref: '#/components/responses/BadRequest'
-
-  /api/v2/accounts/me:
-    get:
-      summary: 获取账户信息
-      description: 获取当前登录账户的信息
-      tags:
-        - 账户管理
-      security:
-        - HMACAuth: []
-        - QstubAuth: []
-      responses:
-        '200':
-          description: 账户信息获取成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AccountInfo'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-
-  /api/v2/accounts/regenerate-sk:
-    post:
-      summary: 重新生成 SecretKey
-      description: 出于安全考虑，定期轮换 SecretKey。旧的 SecretKey 立即失效。
-      tags:
-        - 账户管理
-      security:
-        - HMACAuth: []
-        - QstubAuth: []
-      responses:
-        '200':
-          description: SecretKey 重新生成成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  access_key:
-                    type: string
-                    example: AK_f8e7d6c5b4a392817a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4
-                  secret_key:
-                    type: string
-                    description: 新的 SecretKey，仅显示一次
-                    example: SK_b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2a3
-                  updated_at:
-                    type: string
-                    format: date-time
-                    example: 2025-12-25T10:30:00Z
-        '401':
-          $ref: '#/components/responses/Unauthorized'
 
   /api/v2/tokens:
     post:
@@ -209,7 +95,7 @@ paths:
                 prefix:
                   type: string
                   description: 自定义 Token 前缀（默认 sk-）
-                  example: custom_bearer_
+                  example: mk_
                 rate_limit:
                   type: object
                   description: API 频率限制
@@ -265,9 +151,9 @@ paths:
               schema:
                 type: object
                 properties:
-                  account_id:
+                  uid:
                     type: string
-                    example: acc_1a2b3c4d5e6f
+                    example: "1234567"
                   tokens:
                     type: array
                     items:
@@ -474,9 +360,9 @@ paths:
                       token_id:
                         type: string
                         example: tk_9z8y7x6w5v4u
-                      account_id:
+                      uid:
                         type: string
-                        example: acc_1a2b3c4d5e6f
+                        example: "1234567"
                       scope:
                         type: array
                         items:
@@ -565,9 +451,9 @@ paths:
               schema:
                 type: object
                 properties:
-                  account_id:
+                  uid:
                     type: string
-                    example: acc_1a2b3c4d5e6f
+                    example: "1234567"
                   logs:
                     type: array
                     items:
@@ -644,10 +530,10 @@ components:
           example: tk_9z8y7x6w5v4u
         token:
           type: string
-          example: custom_bearer_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2
-        account_id:
+          example: mk_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2
+        uid:
           type: string
-          example: acc_1a2b3c4d5e6f
+          example: "1234567"
         description:
           type: string
           example: Production read-only token
@@ -716,9 +602,9 @@ components:
         id:
           type: string
           example: log_xyz123
-        account_id:
+        uid:
           type: string
-          example: acc_1a2b3c4d5e6f
+          example: "1234567"
         action:
           type: string
           example: create_token

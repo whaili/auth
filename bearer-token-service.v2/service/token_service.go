@@ -33,9 +33,10 @@ func (s *TokenServiceImpl) CreateToken(ctx context.Context, accountID string, re
 	}
 
 	// 2. 计算过期时间（秒级精度）
-	var expiresAt time.Time
+	var expiresAt *time.Time
 	if req.ExpiresInSeconds > 0 {
-		expiresAt = time.Now().Add(time.Duration(req.ExpiresInSeconds) * time.Second)
+		t := time.Now().Add(time.Duration(req.ExpiresInSeconds) * time.Second)
+		expiresAt = &t
 	}
 
 	// 3. 创建 Token 对象
@@ -94,19 +95,27 @@ func (s *TokenServiceImpl) ListTokens(ctx context.Context, accountID string, act
 	var tokenBriefs []interfaces.TokenBrief
 	now := time.Now()
 	for _, token := range tokens {
-		tokenBriefs = append(tokenBriefs, interfaces.TokenBrief{
+		brief := interfaces.TokenBrief{
 			TokenID:       token.ID,
 			TokenPreview:  hideToken(token.Token), // 隐藏部分 Token
 			Description:   token.Description,
 			Scope:         token.Scope,
 			RateLimit:     token.RateLimit,
 			CreatedAt:     token.CreatedAt,
-			ExpiresAt:     token.ExpiresAt,
 			IsActive:      token.IsActive,
 			Status:        calculateTokenStatus(&token, now), // 动态计算状态
 			TotalRequests: token.TotalRequests,
-			LastUsedAt:    token.LastUsedAt,
-		})
+		}
+
+		// 处理时间字段（避免零值时间）
+		if token.ExpiresAt != nil {
+			brief.ExpiresAt = token.ExpiresAt
+		}
+		if token.LastUsedAt != nil {
+			brief.LastUsedAt = token.LastUsedAt
+		}
+
+		tokenBriefs = append(tokenBriefs, brief)
 	}
 
 	return &interfaces.TokenListResponse{
@@ -205,12 +214,18 @@ func (s *TokenServiceImpl) GetTokenStats(ctx context.Context, accountID string, 
 		return nil, errors.New("permission denied")
 	}
 
-	return &interfaces.TokenStatsResponse{
+	resp := &interfaces.TokenStatsResponse{
 		TokenID:       token.ID,
 		TotalRequests: token.TotalRequests,
-		LastUsedAt:    token.LastUsedAt,
 		CreatedAt:     token.CreatedAt,
-	}, nil
+	}
+
+	// 处理时间字段（避免零值时间）
+	if token.LastUsedAt != nil {
+		resp.LastUsedAt = token.LastUsedAt
+	}
+
+	return resp, nil
 }
 
 // ========================================
@@ -258,8 +273,8 @@ func calculateTokenStatus(token *interfaces.Token, now time.Time) string {
 		return interfaces.TokenStatusDisabled
 	}
 
-	// 2. 已过期（ExpiresAt 不为零值且已过期）
-	if !token.ExpiresAt.IsZero() && token.ExpiresAt.Before(now) {
+	// 2. 已过期（ExpiresAt 不为 nil 且已过期）
+	if token.ExpiresAt != nil && token.ExpiresAt.Before(now) {
 		return interfaces.TokenStatusExpired
 	}
 

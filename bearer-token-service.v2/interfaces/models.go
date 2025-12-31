@@ -28,13 +28,13 @@ type Token struct {
 	Scope       []string   `bson:"scope" json:"scope"`                   // 权限范围
 	RateLimit   *RateLimit `bson:"rate_limit,omitempty" json:"rate_limit,omitempty"`
 	CreatedAt   time.Time  `bson:"created_at" json:"created_at"`
-	ExpiresAt   time.Time  `bson:"expires_at,omitempty" json:"expires_at,omitempty"`
+	ExpiresAt   *time.Time `bson:"expires_at,omitempty" json:"expires_at,omitempty"` // nil 表示永不过期
 	IsActive    bool       `bson:"is_active" json:"is_active"`
 	Prefix      string     `bson:"-" json:"-"`                           // 自定义前缀（不存储到数据库）
 
 	// 使用统计
-	TotalRequests int64     `bson:"total_requests" json:"total_requests"`
-	LastUsedAt    time.Time `bson:"last_used_at,omitempty" json:"last_used_at,omitempty"`
+	TotalRequests int64      `bson:"total_requests" json:"total_requests"`
+	LastUsedAt    *time.Time `bson:"last_used_at,omitempty" json:"last_used_at,omitempty"` // nil 表示从未使用
 }
 
 // RateLimit API 频率限制
@@ -104,7 +104,7 @@ type TokenCreateResponse struct {
 	Scope       []string   `json:"scope"`
 	RateLimit   *RateLimit `json:"rate_limit,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
-	ExpiresAt   time.Time  `json:"expires_at,omitempty"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"` // nil 表示永不过期
 	IsActive    bool       `json:"is_active"`
 }
 
@@ -123,11 +123,11 @@ type TokenBrief struct {
 	Scope         []string   `json:"scope"`
 	RateLimit     *RateLimit `json:"rate_limit,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
-	ExpiresAt     time.Time  `json:"expires_at,omitempty"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`  // nil 表示永不过期
 	IsActive      bool       `json:"is_active"`
 	Status        string     `json:"status"` // Token 综合状态：normal=正常，expired=已过期，disabled=已停用
 	TotalRequests int64      `json:"total_requests"`
-	LastUsedAt    time.Time  `json:"last_used_at,omitempty"`
+	LastUsedAt    *time.Time `json:"last_used_at,omitempty"` // nil 表示从未使用
 }
 
 // TokenUpdateStatusRequest 更新 Token 状态请求
@@ -168,10 +168,10 @@ type PermissionCheckResult struct {
 
 // TokenStatsResponse Token 使用统计响应
 type TokenStatsResponse struct {
-	TokenID       string    `json:"token_id"`
-	TotalRequests int64     `json:"total_requests"`
-	LastUsedAt    time.Time `json:"last_used_at,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
+	TokenID       string     `json:"token_id"`
+	TotalRequests int64      `json:"total_requests"`
+	LastUsedAt    *time.Time `json:"last_used_at,omitempty"` // nil 表示从未使用
+	CreatedAt     time.Time  `json:"created_at"`
 	DailyStats    []DailyStat `json:"daily_stats,omitempty"` // 未来：每日统计
 }
 

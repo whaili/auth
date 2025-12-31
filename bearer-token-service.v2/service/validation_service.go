@@ -52,7 +52,7 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 	}
 
 	// 3. 检查 Token 是否过期
-	if !token.ExpiresAt.IsZero() && token.ExpiresAt.Before(time.Now()) {
+	if token.ExpiresAt != nil && token.ExpiresAt.Before(time.Now()) {
 		return &interfaces.TokenValidateResponse{
 			Valid:   false,
 			Message: "Token has expired",
@@ -85,11 +85,11 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 	}
 
 	// 处理时间字段（避免零值时间）
-	if !token.ExpiresAt.IsZero() {
-		tokenInfo.ExpiresAt = &token.ExpiresAt
+	if token.ExpiresAt != nil {
+		tokenInfo.ExpiresAt = token.ExpiresAt
 	}
-	if !token.LastUsedAt.IsZero() {
-		tokenInfo.LastUsedAt = &token.LastUsedAt
+	if token.LastUsedAt != nil {
+		tokenInfo.LastUsedAt = token.LastUsedAt
 	}
 
 	// 根据 account_id 格式判断用户类型
