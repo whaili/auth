@@ -8,15 +8,16 @@ import "time"
 
 // Account 租户账户模型
 type Account struct {
-	ID        string    `bson:"_id,omitempty" json:"id"`
-	Email     string    `bson:"email" json:"email"`
-	Company   string    `bson:"company" json:"company"`
-	AccessKey string    `bson:"access_key" json:"access_key"` // AK_xxx
-	SecretKey string    `bson:"secret_key" json:"-"`          // bcrypt 加密，不返回客户端
-	Status    string    `bson:"status" json:"status"`         // active, suspended
-	QiniuUID  uint32    `bson:"qiniu_uid,omitempty" json:"qiniu_uid,omitempty"` // 七牛 UID（可选）
-	CreatedAt time.Time `bson:"created_at" json:"created_at"`
-	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
+	ID        string     `bson:"_id,omitempty" json:"id"`
+	Email     string     `bson:"email" json:"email"`
+	Company   string     `bson:"company" json:"company"`
+	AccessKey string     `bson:"access_key" json:"access_key"` // AK_xxx
+	SecretKey string     `bson:"secret_key" json:"-"`          // bcrypt 加密，不返回客户端
+	Status    string     `bson:"status" json:"status"`         // active, suspended
+	RateLimit *RateLimit `bson:"rate_limit,omitempty" json:"rate_limit,omitempty"` // 账户级限流配置
+	QiniuUID  uint32     `bson:"qiniu_uid,omitempty" json:"qiniu_uid,omitempty"` // 七牛 UID（可选）
+	CreatedAt time.Time  `bson:"created_at" json:"created_at"`
+	UpdatedAt time.Time  `bson:"updated_at" json:"updated_at"`
 }
 
 // Token Bearer Token 模型（带权限控制）

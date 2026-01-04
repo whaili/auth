@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"bearer-token-service.v1/v2/auth"
+	"bearer-token-service.v1/v2/config"
 	"bearer-token-service.v1/v2/handlers"
+	"bearer-token-service.v1/v2/ratelimit"
 	"bearer-token-service.v1/v2/repository"
 	"bearer-token-service.v1/v2/service"
 	"github.com/gorilla/mux"
@@ -163,9 +165,60 @@ func main() {
 	log.Printf("✅ Unified authentication middleware initialized (HMAC + Qstub, tolerance=%v)", timestampTolerance)
 
 	// ========================================
-	// 6. 设置路由
+	// 6. 初始化限流中间件（可选）
+	// ========================================
+	rateLimitConfig := config.LoadRateLimitConfig()
+
+	// 创建限流器
+	limiter := ratelimit.NewMemoryLimiter()
+
+	// 创建限流管理器
+	rateLimitManager := ratelimit.NewRateLimitManager(limiter, ratelimit.RateLimitConfig{
+		AppLimit:           rateLimitConfig.GetAppRateLimit(),
+		EnableAppLimit:     rateLimitConfig.EnableAppLimit,
+		EnableAccountLimit: rateLimitConfig.EnableAccountLimit,
+		EnableTokenLimit:   rateLimitConfig.EnableTokenLimit,
+	})
+
+	// 创建限流中间件
+	rateLimitMiddleware := ratelimit.NewMiddleware(rateLimitManager, accountRepo, tokenRepo)
+
+	// 打印限流配置状态
+	if rateLimitConfig.EnableAppLimit {
+		log.Printf("✅ Application rate limit ENABLED: %d req/min, %d req/hour, %d req/day",
+			rateLimitConfig.AppLimitPerMinute,
+			rateLimitConfig.AppLimitPerHour,
+			rateLimitConfig.AppLimitPerDay)
+	} else {
+		log.Println("ℹ️  Application rate limit DISABLED (set ENABLE_APP_RATE_LIMIT=true to enable)")
+	}
+
+	if rateLimitConfig.EnableAccountLimit {
+		log.Println("✅ Account rate limit ENABLED (configured per account)")
+	} else {
+		log.Println("ℹ️  Account rate limit DISABLED (set ENABLE_ACCOUNT_RATE_LIMIT=true to enable)")
+	}
+
+	if rateLimitConfig.EnableTokenLimit {
+		log.Println("✅ Token rate limit ENABLED (configured per token)")
+	} else {
+		log.Println("ℹ️  Token rate limit DISABLED (set ENABLE_TOKEN_RATE_LIMIT=true to enable)")
+	}
+
+	// ========================================
+	// 7. 设置路由
 	// ========================================
 	router := mux.NewRouter()
+
+	// 应用全局限流中间件（如果启用）
+	if rateLimitConfig.EnableAppLimit {
+		router.Use(rateLimitMiddleware.AppLimitMiddleware)
+	}
+
+	// 应用账户层限流中间件（如果启用）
+	if rateLimitConfig.EnableAccountLimit {
+		router.Use(rateLimitMiddleware.AccountLimitMiddleware)
+	}
 
 	// 健康检查
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +242,13 @@ func main() {
 	router.HandleFunc("/api/v2/tokens/{id}/stats", unifiedMiddleware.Authenticate(tokenHandler.GetTokenStats)).Methods("GET")
 
 	// Token 验证（使用 Bearer Token 认证）
-	router.HandleFunc("/api/v2/validate", validationHandler.ValidateToken).Methods("POST")
+	// 为 Token 层限流包装验证 handler
+	var validateTokenHandler http.Handler = http.HandlerFunc(validationHandler.ValidateToken)
+	if rateLimitConfig.EnableTokenLimit {
+		// 提取 Token 到上下文，然后应用 Token 限流
+		validateTokenHandler = extractTokenMiddleware(rateLimitMiddleware.TokenLimitMiddleware(validateTokenHandler))
+	}
+	router.Handle("/api/v2/validate", validateTokenHandler).Methods("POST")
 
 	// 权限列表（公开接口，无需认证）
 	router.HandleFunc("/api/v2/permissions", permissionHandler.GetAllPermissions).Methods("GET")
@@ -253,6 +312,22 @@ func extractDatabaseFromURI(uri string) string {
 	}
 
 	return ""
+}
+
+// ========================================
+// 辅助中间件：从 Authorization 头提取 Token 到上下文
+// ========================================
+func extractTokenMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 提取 Bearer Token
+		authHeader := r.Header.Get("Authorization")
+		if strings.HasPrefix(authHeader, "Bearer ") {
+			tokenValue := strings.TrimPrefix(authHeader, "Bearer ")
+			// 设置到上下文
+			r = ratelimit.SetTokenToContext(r, tokenValue)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ========================================

@@ -61,6 +61,26 @@ permission/
 └── scope.go                   # Scope 验证逻辑（支持通配符）
 ```
 
+### 限流模块（新增）
+```
+ratelimit/
+├── limiter.go                 # 限流器核心实现（滑动窗口算法）
+├── middleware.go              # 三层限流中间件
+config/
+└── ratelimit.go               # 限流配置管理
+```
+
+**三层限流架构**：
+1. **应用层限流**：全局请求限流（保护整个服务）
+2. **账户层限流**：单个账户的请求限流（防止单租户滥用）
+3. **Token层限流**：单个Token的请求限流（精细化控制）
+
+**特性**：
+- 滑动窗口算法（支持分钟/小时/天三个维度）
+- 内存存储（高性能，自动清理）
+- 默认全部关闭（通过环境变量启用）
+- HTTP 响应头返回限流状态
+
 ---
 
 ## 核心数据模型
@@ -70,13 +90,14 @@ permission/
 ### Account（租户账户）
 ```go
 Account {
-    ID         string    // 账户唯一标识
-    Email      string    // 邮箱地址（唯一索引）
-    Company    string    // 公司名称
-    AccessKey  string    // AK_xxx 格式（唯一索引）
-    SecretKey  string    // bcrypt 加密存储
-    Status     string    // active/suspended
-    QiniuUID   string    // 七牛 UID（可选关联）
+    ID         string     // 账户唯一标识
+    Email      string     // 邮箱地址（唯一索引）
+    Company    string     // 公司名称
+    AccessKey  string     // AK_xxx 格式（唯一索引）
+    SecretKey  string     // bcrypt 加密存储
+    Status     string     // active/suspended
+    RateLimit  *RateLimit // 账户级限流配置（新增）
+    QiniuUID   string     // 七牛 UID（可选关联）
     CreatedAt  time.Time
     UpdatedAt  time.Time
 }
@@ -86,6 +107,7 @@ Account {
 - AccessKey/SecretKey 对类似 AWS
 - SecretKey 使用 bcrypt 加密存储（不可逆）
 - 支持 SecretKey 轮换（重新生成）
+- **RateLimit 字段**：账户级限流配置（可选）
 
 ### Token（Bearer Token）
 ```go
@@ -305,6 +327,19 @@ ValidationService.ValidateToken()
 | `QINIU_UID_AUTO_CREATE` | `false` | 自动创建账户 | 集成灵活性 |
 | `HMAC_TIMESTAMP_TOLERANCE` | `15m` | 时间容差 | 防重放强度 |
 | `SKIP_INDEX_CREATION` | `false` | 跳过索引创建 | 负载均衡部署 |
+| **限流配置** |
+| `ENABLE_APP_RATE_LIMIT` | `false` | 应用层限流开关 | **默认关闭** |
+| `ENABLE_ACCOUNT_RATE_LIMIT` | `false` | 账户层限流开关 | **默认关闭** |
+| `ENABLE_TOKEN_RATE_LIMIT` | `false` | Token层限流开关 | **默认关闭** |
+| `APP_RATE_LIMIT_PER_MINUTE` | `1000` | 应用层分钟限流 | 全局流量保护 |
+| `APP_RATE_LIMIT_PER_HOUR` | `50000` | 应用层小时限流 | 全局流量保护 |
+| `APP_RATE_LIMIT_PER_DAY` | `1000000` | 应用层天级限流 | 全局流量保护 |
+
+**限流配置说明**：
+- 三层限流默认全部关闭，需手动启用
+- 账户层和 Token 层的限流配置存储在数据库中（Account.RateLimit / Token.RateLimit）
+- 限流触发时返回 `429 Too Many Requests`，并设置 `Retry-After` 头
+- 响应头包含限流状态：`X-RateLimit-Limit-*`, `X-RateLimit-Remaining-*`, `X-RateLimit-Reset-*`
 
 ### 部署模式
 
@@ -323,6 +358,70 @@ export EXTERNAL_ACCOUNT_API_URL="https://account.example.com"
 ./bearer-token-service
 ```
 
+#### 启用限流模式
+```bash
+# 启用应用层限流（全局保护）
+export ENABLE_APP_RATE_LIMIT=true
+export APP_RATE_LIMIT_PER_MINUTE=1000
+export APP_RATE_LIMIT_PER_HOUR=50000
+export APP_RATE_LIMIT_PER_DAY=1000000
+
+# 启用账户层限流（防止单租户滥用）
+export ENABLE_ACCOUNT_RATE_LIMIT=true
+
+# 启用 Token 层限流（精细化控制）
+export ENABLE_TOKEN_RATE_LIMIT=true
+
+./bearer-token-service
+```
+
+**限流使用示例**：
+
+1. **创建带限流的 Token**：
+```bash
+POST /api/v2/tokens
+{
+  "description": "Limited upload token",
+  "scope": ["storage:write"],
+  "expires_in_seconds": 3600,
+  "rate_limit": {
+    "requests_per_minute": 100,
+    "requests_per_hour": 5000,
+    "requests_per_day": 100000
+  }
+}
+```
+
+2. **限流触发的响应**：
+```http
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+X-RateLimit-Limit-Token: 100
+X-RateLimit-Remaining-Token: 0
+X-RateLimit-Reset-Token: 1735992345
+Retry-After: 45
+
+{
+  "error": "Token rate limit exceeded",
+  "code": 429,
+  "timestamp": "2026-01-04T10:30:00Z"
+}
+```
+
+3. **正常响应中的限流头**：
+```http
+HTTP/1.1 200 OK
+X-RateLimit-Limit-App: 1000
+X-RateLimit-Remaining-App: 856
+X-RateLimit-Reset-App: 1735992400
+X-RateLimit-Limit-Account: 500
+X-RateLimit-Remaining-Account: 234
+X-RateLimit-Reset-Account: 1735992400
+X-RateLimit-Limit-Token: 100
+X-RateLimit-Remaining-Token: 67
+X-RateLimit-Reset-Token: 1735992400
+```
+
 ---
 
 ## 数据库设计
@@ -338,6 +437,11 @@ export EXTERNAL_ACCOUNT_API_URL="https://account.example.com"
   access_key: "AK_xxx",             // 唯一索引
   secret_key: "$2a$10$...",         // bcrypt 哈希
   status: "active",
+  rate_limit: {                     // 账户级限流配置（新增）
+    requests_per_minute: 500,
+    requests_per_hour: 30000,
+    requests_per_day: 500000
+  },
   qiniu_uid: "qiniu_123",           // 索引
   created_at: ISODate,
   updated_at: ISODate
