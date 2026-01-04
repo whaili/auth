@@ -120,6 +120,19 @@ echo "  账户层限流: 将设置为 3 req/min"
 echo "  Token层限流: 将设置为 2 req/min"
 echo ""
 
+# 清理旧数据
+echo "========================================="
+echo "1.5. 清理测试数据库（如果存在）"
+echo "========================================="
+
+mongosh "$MONGO_URI" --quiet --eval "
+    use $MONGO_DATABASE;
+    db.dropDatabase();
+    print('Database cleaned');
+" 2>/dev/null || echo -e "${YELLOW}⚠ 无法清理数据库（可能不存在）${NC}"
+echo -e "${GREEN}✓ 数据库已清理${NC}"
+echo ""
+
 echo "========================================="
 echo "2. 注册测试账户"
 echo "========================================="
