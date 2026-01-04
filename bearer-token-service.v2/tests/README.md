@@ -9,6 +9,9 @@
 | 文件 | 说明 | 用途 |
 |------|------|------|
 | `test_api.sh` | 自动化测试脚本 | 测试所有 API 端点 |
+| `test_rate_limit_improved.sh` | **限流完整测试（推荐）** | 测试三层限流功能 |
+| `test_rate_limit_quick.sh` | 限流快速测试 | 快速验证限流是否工作 |
+| `test_rate_limit.sh` | 限流基础测试 | 原始版本（已过时） |
 | `hmac_client.py` | HMAC 签名客户端 | Python 客户端库 + CLI 工具 |
 | `README.md` | 本文件 | 完整测试指南 |
 
@@ -567,3 +570,204 @@ db.audit_logs.find().sort({timestamp: -1}).limit(10).pretty()
 ---
 
 **Happy Testing!** 🎉
+
+---
+
+## 🚦 限流功能测试
+
+### 测试脚本说明
+
+#### 1. test_rate_limit_improved.sh（完整测试 - 推荐）
+
+**自动化完整测试**，验证所有三层限流功能。
+
+**特点**：
+- ✅ 自动启动服务（带限流配置）
+- ✅ 测试应用层限流（5 req/min）
+- ✅ 测试 Token 层限流（2 req/min）
+- ✅ 测试账户层限流（3 req/min）
+- ✅ 验证限流响应头
+- ✅ 自动清理测试环境
+- ⚠️ 需要等待限流窗口重置（约 3 分钟）
+
+**运行方式**：
+```bash
+cd /root/src/auth/bearer-token-service.v2
+./tests/test_rate_limit_improved.sh
+```
+
+**预期输出**：
+```
+✓✓✓ 应用层限流测试通过 - 成功触发限流！
+✓✓✓ Token 层限流测试通过 - 成功触发限流！
+✓✓✓ 账户层限流测试通过 - 成功触发限流！
+╔════════════════════════════════════════╗
+║  ✓✓✓ 三层限流功能测试全部通过！  ║
+╚════════════════════════════════════════╝
+```
+
+---
+
+#### 2. test_rate_limit_quick.sh（快速测试）
+
+**快速验证**限流是否工作，无需等待窗口重置。
+
+**特点**：
+- ✅ 快速检查应用层限流
+- ✅ 可选测试 Token 层限流
+- ✅ 无需等待窗口重置
+- ⚠️ 需要手动启动服务
+
+**运行方式**：
+```bash
+# 1. 先启动服务（启用限流）
+export MONGO_URI="mongodb://admin:123456@localhost:27017/token_service_v2?authSource=admin"
+export MONGO_DATABASE="token_service_v2"
+export PORT="8081"
+export ENABLE_APP_RATE_LIMIT=true
+export APP_RATE_LIMIT_PER_MINUTE=5
+export ENABLE_TOKEN_RATE_LIMIT=true
+./bearer-token-service
+
+# 2. 在另一个终端运行测试
+./tests/test_rate_limit_quick.sh
+```
+
+---
+
+### 限流配置说明
+
+#### 应用层限流（全局）
+```bash
+export ENABLE_APP_RATE_LIMIT=true
+export APP_RATE_LIMIT_PER_MINUTE=5    # 每分钟 5 个请求
+export APP_RATE_LIMIT_PER_HOUR=100    # 每小时 100 个请求
+export APP_RATE_LIMIT_PER_DAY=1000    # 每天 1000 个请求
+```
+
+#### 账户层限流（单租户）
+通过数据库配置：
+```javascript
+db.accounts.updateOne(
+  { _id: "account_id" },
+  {
+    $set: {
+      rate_limit: {
+        requests_per_minute: 3,
+        requests_per_hour: 50,
+        requests_per_day: 500
+      }
+    }
+  }
+)
+```
+
+#### Token 层限流（单 Token）
+创建 Token 时指定：
+```json
+{
+  "description": "Test Token",
+  "scope": ["storage:write"],
+  "expires_in_seconds": 3600,
+  "rate_limit": {
+    "requests_per_minute": 2,
+    "requests_per_hour": 30,
+    "requests_per_day": 300
+  }
+}
+```
+
+---
+
+### 限流响应示例
+
+#### 成功响应（带限流头）
+```http
+HTTP/1.1 200 OK
+X-RateLimit-Limit-App: 5
+X-RateLimit-Remaining-App: 3
+X-RateLimit-Reset-App: 1735992400
+X-RateLimit-Limit-Token: 2
+X-RateLimit-Remaining-Token: 1
+X-RateLimit-Reset-Token: 1735992400
+```
+
+#### 限流触发
+```http
+HTTP/1.1 429 Too Many Requests
+Content-Type: application/json
+X-RateLimit-Limit-App: 5
+X-RateLimit-Remaining-App: 0
+X-RateLimit-Reset-App: 1735992400
+Retry-After: 45
+
+{
+  "error": "Application rate limit exceeded",
+  "code": 429,
+  "timestamp": "2026-01-04T10:30:00Z"
+}
+```
+
+---
+
+### 验收标准
+
+#### ✅ 应用层限流
+- 发送 10 个请求，前 5 个返回 200，后 5 个返回 429
+- 响应头包含 `X-RateLimit-Limit-App`
+- 响应头包含 `Retry-After`
+
+#### ✅ Token 层限流
+- 发送 5 个 Token 验证请求，前 2 个返回 200，后 3 个返回 429
+- 响应头包含 `X-RateLimit-Limit-Token`
+- 错误消息为 "Token rate limit exceeded"
+
+#### ✅ 账户层限流
+- 发送 6 个 HMAC 认证请求，前 3 个返回 200，后 3 个返回 429
+- 响应头包含 `X-RateLimit-Limit-Account`
+- 错误消息为 "Account rate limit exceeded"
+
+---
+
+### 故障排查
+
+#### 1. 限流未触发
+**原因**：
+- 限流功能未启用（环境变量未设置）
+- 限流阈值设置过高
+- 滑动窗口还未累积足够的请求
+
+**解决**：
+```bash
+# 检查环境变量
+echo $ENABLE_APP_RATE_LIMIT
+
+# 降低限流阈值
+export APP_RATE_LIMIT_PER_MINUTE=3
+
+# 连续快速发送请求
+for i in {1..10}; do curl http://localhost:8081/health; done
+```
+
+#### 2. 服务启动失败
+**原因**：
+- MongoDB 未运行
+- 端口被占用
+- 编译失败
+
+**解决**：
+```bash
+# 检查 MongoDB
+mongosh mongodb://admin:123456@localhost:27017
+
+# 检查端口
+lsof -i :8081
+
+# 重新编译
+go build -o bearer-token-service ./cmd/server
+```
+
+---
+
+更多信息请参考 `docs/RATE_LIMIT.md`
+
