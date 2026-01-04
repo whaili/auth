@@ -122,14 +122,28 @@ echo ""
 
 # 清理旧数据
 echo "========================================="
-echo "1.5. 清理测试数据库（如果存在）"
+echo "1.5. 清理测试数据（确保干净环境）"
 echo "========================================="
 
-mongosh "$MONGO_URI" --quiet --eval "
-    use $MONGO_DATABASE;
+# 删除整个数据库和所有集合
+mongosh "$MONGO_URI/$MONGO_DATABASE" --quiet --eval "
     db.dropDatabase();
-    print('Database cleaned');
-" 2>/dev/null || echo -e "${YELLOW}⚠ 无法清理数据库（可能不存在）${NC}"
+    print('Database dropped');
+" 2>&1 | grep -v "switched to"
+
+# 等待操作完成
+sleep 2
+
+# 再次确认清理所有集合
+mongosh "$MONGO_URI/$MONGO_DATABASE" --quiet --eval "
+    var colls = db.getCollectionNames();
+    colls.forEach(function(c) { db[c].drop(); });
+    db.accounts.deleteMany({});
+    db.tokens.deleteMany({});
+    db.audit_logs.deleteMany({});
+    print('All data cleared');
+" 2>&1 | grep -v "switched to"
+
 echo -e "${GREEN}✓ 数据库已清理${NC}"
 echo ""
 
@@ -137,17 +151,40 @@ echo "========================================="
 echo "2. 注册测试账户"
 echo "========================================="
 
+# 使用时间戳确保邮箱唯一
+TEST_EMAIL="test-$(date +%s)@example.com"
+
 REGISTER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/v2/accounts/register" \
     -H "Content-Type: application/json" \
-    -d '{
-        "email": "test@example.com",
-        "company": "Test Company",
-        "password": "password123456"
-    }')
+    -d "{
+        \"email\": \"$TEST_EMAIL\",
+        \"company\": \"Test Company\",
+        \"password\": \"password123456\"
+    }")
+
+# 检查响应
+if echo "$REGISTER_RESPONSE" | grep -q "email already registered"; then
+    echo -e "${RED}✗ 邮箱已注册，使用备用邮箱重试...${NC}"
+    TEST_EMAIL="test-backup-$(date +%s%N)@example.com"
+    REGISTER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/v2/accounts/register" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"email\": \"$TEST_EMAIL\",
+            \"company\": \"Test Company\",
+            \"password\": \"password123456\"
+        }")
+fi
 
 echo "$REGISTER_RESPONSE" | jq . || {
     echo -e "${RED}✗ 账户注册失败${NC}"
     echo "$REGISTER_RESPONSE"
+    echo ""
+    echo "可能的原因："
+    echo "  1. 数据库清理不彻底"
+    echo "  2. 服务使用了不同的数据库"
+    echo ""
+    echo "手动清理命令："
+    echo "  mongosh \"$MONGO_URI/$MONGO_DATABASE\" --eval \"db.dropDatabase()\""
     exit 1
 }
 
@@ -157,6 +194,8 @@ ACCOUNT_ID=$(echo "$REGISTER_RESPONSE" | jq -r .account_id)
 
 if [ "$ACCESS_KEY" = "null" ] || [ -z "$ACCESS_KEY" ]; then
     echo -e "${RED}✗ 无法获取 AccessKey${NC}"
+    echo "响应内容："
+    echo "$REGISTER_RESPONSE"
     exit 1
 fi
 
