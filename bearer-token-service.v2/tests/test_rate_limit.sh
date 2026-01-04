@@ -57,7 +57,7 @@ echo ""
 
 # 配置
 BASE_URL="http://localhost:8081"
-MONGO_URI="mongodb://admin:123456@localhost:27017/token_service_v2_test?authSource=admin"
+MONGO_URI="mongodb://admin:123456@localhost:27017?authSource=admin"
 MONGO_DATABASE="token_service_v2_test"
 
 # 清理函数
@@ -95,6 +95,16 @@ export ENABLE_TOKEN_RATE_LIMIT=true
 
 # 启动服务
 echo "启动服务..."
+
+# 检查二进制文件是否存在（相对于项目根目录）
+if [ ! -f "../bin/tokenserv" ]; then
+    echo -e "${RED}✗ 未找到 bin/tokenserv 二进制文件${NC}"
+    echo "请先编译："
+    echo "  cd /root/src/auth/bearer-token-service.v2"
+    echo "  make compile"
+    exit 1
+fi
+
 ../bin/tokenserv > /tmp/bearer-token-service-test.log 2>&1 &
 SERVER_PID=$!
 
@@ -237,10 +247,16 @@ URI="/api/v2/tokens"
 METHOD="POST"
 BODY='{"description":"Test Token","scope":["storage:write"],"expires_in_seconds":3600,"rate_limit":{"requests_per_minute":2,"requests_per_hour":30,"requests_per_day":300}}'
 
-# 计算签名
-STRING_TO_SIGN="${METHOD}\n${URI}\n${TIMESTAMP}\n${BODY}"
-SIGNATURE=$(echo -n "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$SECRET_KEY" -binary | base64)
+# 计算签名（使用 printf 确保正确处理换行符）
+STRING_TO_SIGN=$(printf "%s\n%s\n%s\n%s" "$METHOD" "$URI" "$TIMESTAMP" "$BODY")
+SIGNATURE=$(printf "%s" "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$SECRET_KEY" -binary | base64)
 AUTH_HEADER="QINIU ${ACCESS_KEY}:${SIGNATURE}"
+
+echo "调试信息："
+echo "  Timestamp: $TIMESTAMP"
+echo "  SecretKey前10字符: ${SECRET_KEY:0:10}..."
+echo "  签名: ${SIGNATURE:0:20}..."
+echo ""
 
 TOKEN_RESPONSE=$(curl -s -X POST "$BASE_URL$URI" \
     -H "Content-Type: application/json" \
