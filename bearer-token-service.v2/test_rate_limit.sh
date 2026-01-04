@@ -9,8 +9,8 @@ echo "========================================="
 echo ""
 
 # 配置
-BASE_URL="http://localhost:8080"
-MONGO_URI="mongodb://localhost:27017"
+BASE_URL="http://localhost:8081"
+MONGO_URI="mongodb://admin:123456@localhost:27017/token_service_v2_test?authSource=admin"
 MONGO_DATABASE="token_service_v2_test"
 
 # 颜色输出
@@ -41,7 +41,7 @@ echo "========================================="
 # 设置环境变量
 export MONGO_URI="$MONGO_URI"
 export MONGO_DATABASE="$MONGO_DATABASE"
-export PORT="8080"
+export PORT="8081"
 
 # 启用三层限流（设置较小的值便于测试）
 export ENABLE_APP_RATE_LIMIT=true

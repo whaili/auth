@@ -318,9 +318,9 @@ ValidationService.ValidateToken()
 
 | 变量 | 默认值 | 说明 | 修改影响 |
 |------|--------|------|----------|
-| `MONGO_URI` | `mongodb://localhost:27017` | MongoDB 连接 | 本地/云部署 |
+| `MONGO_URI` | `mongodb://admin:123456@localhost:27017/token_service_v2?authSource=admin` | MongoDB 连接 | 本地/云部署 |
 | `MONGO_DATABASE` | `token_service_v2` | 数据库名 | 数据隔离 |
-| `PORT` | `8080` | 监听端口 | 服务访问 |
+| `PORT` | `8081` | 监听端口 | 服务访问（本地开发） |
 | `ACCOUNT_FETCHER_MODE` | `local` | 账户查询方式 | local/external |
 | `EXTERNAL_ACCOUNT_API_URL` | - | 外部 API 地址 | 生产环境 |
 | `QINIU_UID_MAPPER_MODE` | `simple` | UID 映射方式 | simple/database |
