@@ -14,7 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 配置
-BASE_URL="${BASE_URL:-http://localhost:8080}"
+BASE_URL="${BASE_URL:-http://localhost:8081}"
 TEST_EMAIL="test$(date +%s)@example.com"
 TEST_COMPANY="Test Company"
 TEST_PASSWORD="testPassword123"

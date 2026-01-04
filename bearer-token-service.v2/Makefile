@@ -113,7 +113,7 @@ status: ## 查看服务状态
 	@$(COMPOSE) ps
 	@echo ""
 	@echo "$(COLOR_INFO)健康检查:$(COLOR_RESET)"
-	@curl -s http://localhost:8080/health | jq . || echo "$(COLOR_ERROR)❌ 服务未就绪$(COLOR_RESET)"
+	@curl -s http://localhost:8081/health | jq . || echo "$(COLOR_ERROR)❌ 服务未就绪$(COLOR_RESET)"
 
 stats: ## 查看资源使用
 	docker stats --no-stream
@@ -296,8 +296,8 @@ package: ## 打包生产部署文件（镜像 + 配置）
 	@mkdir -p dist/deploy
 	@echo ""
 	@echo "$(COLOR_INFO)1. 导出 Docker 镜像...$(COLOR_RESET)"
-	docker save $(PROJECT_NAME):$(VERSION) -o dist/deploy/bearer-token-service.tar
-	@ls -lh dist/deploy/bearer-token-service.tar
+	docker save $(PROJECT_NAME):$(VERSION) -o dist/bearer-token-service.tar
+	@ls -lh dist/bearer-token-service.tar
 	@echo ""
 	@echo "$(COLOR_INFO)2. 复制配置文件...$(COLOR_RESET)"
 	cp docker-compose.yml dist/deploy/docker-compose.yml
@@ -320,11 +320,23 @@ package: ## 打包生产部署文件（镜像 + 配置）
 	@echo "  - scripts/systemd/ (systemd service 文件)"
 	@echo "  - scripts/run-without-docker.sh (无 Docker 运行脚本)"
 	@echo ""
-	@echo "$(COLOR_INFO)5. 检查部署说明...$(COLOR_RESET)"
+	@echo "$(COLOR_INFO)5. 生成测试脚本...$(COLOR_RESET)"
+	@rm -rf dist/deploy/tests
+	@cp -r tests dist/deploy/
+	@sed -i 's|http://localhost:8081|http://localhost|g' dist/deploy/tests/test_api.sh
+	@sed -i 's|http://localhost:8081|http://localhost|g' dist/deploy/tests/hmac_client.py
+	@rm -f dist/deploy/tests/QSTUB_TESTS.md
+	@echo "  - tests/ (已调整为生产环境配置: http://localhost)"
+	@echo ""
+	@echo "$(COLOR_INFO)6. 检查部署说明...$(COLOR_RESET)"
 	@[ -f dist/deploy/DEPLOY.md ] && echo "  ✅ DEPLOY.md (已存在)" || echo "  ⚠️  DEPLOY.md 不存在，请创建"
 	@[ -f dist/deploy/VM_TEST_CHECKLIST.md ] && echo "  ✅ VM_TEST_CHECKLIST.md (已存在)" || true
 	@echo ""
-	@echo "$(COLOR_INFO)6. 打包为 tar.gz...$(COLOR_RESET)"
+	@echo "$(COLOR_INFO)7. 复制 Docker 镜像到部署目录...$(COLOR_RESET)"
+	@cp dist/bearer-token-service.tar dist/deploy/
+	@echo "  - bearer-token-service.tar"
+	@echo ""
+	@echo "$(COLOR_INFO)8. 打包为 tar.gz...$(COLOR_RESET)"
 	cd dist && tar czf bearer-token-service-$(VERSION)-deploy.tar.gz deploy/
 	@ls -lh dist/bearer-token-service-$(VERSION)-deploy.tar.gz
 	@echo ""

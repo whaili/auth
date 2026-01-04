@@ -344,55 +344,7 @@ Authorization: QiniuStub uid=1369077332&ut=1
 - `uid`: 七牛用户 ID
 - `ut`: 用户类型(通常为 1)
 
-### 1. 列出 Tokens
-
-获取当前用户的所有Token列表。
-
-```bash
-GET /api/v2/tokens?active_only=true&limit=50&offset=0
-```
-
-**请求头**:
-```
-Authorization: QiniuStub uid=1369077332&ut=1
-```
-
-**查询参数**:
-
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| active_only | boolean | false | 仅显示激活的 Token |
-| limit | integer | 50 | 返回数量(最大 100) |
-| offset | integer | 0 | 偏移量 |
-
-**响应示例**:
-```json
-{
-  "account_id": "acc_1a2b3c4d5e6f",
-  "tokens": [
-    {
-      "token_id": "tk_9z8y7x6w5v4u",
-      "token_preview": "sk-a1b2c3d4e5f6g7******************************c9d0e1f2",
-      "description": "Production API Token",
-      "scope": ["storage:read", "storage:write"],
-      "created_at": "2025-12-30T10:00:00Z",
-      "expires_at": "2026-03-30T10:00:00Z",
-      "is_active": true,
-      "status": "normal",
-      "total_requests": 12567,
-      "last_used_at": "2025-12-30T09:45:00Z"
-    }
-  ],
-  "total": 1
-}
-```
-
-**Status 字段说明**:
-- `normal`: 正常(未过期且已激活)
-- `expired`: 已过期
-- `disabled`: 已停用
-
-### 2. 获取 Token 详情
+### 1. 获取 Token 详情
 
 获取指定Token的详细信息。
 
@@ -422,7 +374,7 @@ Authorization: QiniuStub uid=1369077332&ut=1
 }
 ```
 
-### 3. 获取 Token 使用统计
+### 2. 获取 Token 使用统计
 
 获取Token的使用统计信息。
 
@@ -445,7 +397,7 @@ Authorization: QiniuStub uid=1369077332&ut=1
 }
 ```
 
-### 4. 查询审计日志
+### 3. 查询审计日志
 
 查询Token相关的操作审计日志。
 
