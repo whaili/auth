@@ -57,7 +57,7 @@ echo ""
 
 # 配置
 BASE_URL="http://localhost:8081"
-MONGO_URI="mongodb://admin:123456@localhost:27017?authSource=admin"
+MONGO_URI="mongodb://admin:123456@localhost:27017/token_service_v2_test?authSource=admin"
 MONGO_DATABASE="token_service_v2_test"
 
 # 清理函数
@@ -136,7 +136,7 @@ echo "1.5. 清理测试数据（确保干净环境）"
 echo "========================================="
 
 # 删除整个数据库和所有集合
-mongosh "$MONGO_URI/$MONGO_DATABASE" --quiet --eval "
+mongosh "$MONGO_URI" --quiet --eval "
     db.dropDatabase();
     print('Database dropped');
 " 2>&1 | grep -v "switched to"
@@ -145,7 +145,7 @@ mongosh "$MONGO_URI/$MONGO_DATABASE" --quiet --eval "
 sleep 2
 
 # 再次确认清理所有集合
-mongosh "$MONGO_URI/$MONGO_DATABASE" --quiet --eval "
+mongosh "$MONGO_URI" --quiet --eval "
     var colls = db.getCollectionNames();
     colls.forEach(function(c) { db[c].drop(); });
     db.accounts.deleteMany({});
@@ -247,9 +247,17 @@ URI="/api/v2/tokens"
 METHOD="POST"
 BODY='{"description":"Test Token","scope":["storage:write"],"expires_in_seconds":3600,"rate_limit":{"requests_per_minute":2,"requests_per_hour":30,"requests_per_day":300}}'
 
-# 计算签名（使用 printf 确保正确处理换行符）
+# 计算签名（注意：bash命令替换会移除末尾换行符，需要补回）
 STRING_TO_SIGN=$(printf "%s\n%s\n%s\n%s" "$METHOD" "$URI" "$TIMESTAMP" "$BODY")
-SIGNATURE=$(printf "%s" "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$SECRET_KEY" -binary | base64)
+# 如果BODY为空，需要在末尾添加换行符（因为fmt.Sprintf会在最后加\n）
+# 如果BODY非空，不需要添加（fmt.Sprintf不会在BODY后加\n）
+if [ -z "$BODY" ]; then
+    # BODY为空，使用echo添加换行符
+    SIGNATURE=$(echo "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$SECRET_KEY" -binary | base64)
+else
+    # BODY非空，使用printf不添加换行符
+    SIGNATURE=$(printf "%s" "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$SECRET_KEY" -binary | base64)
+fi
 AUTH_HEADER="QINIU ${ACCESS_KEY}:${SIGNATURE}"
 
 echo "调试信息："
@@ -288,6 +296,11 @@ echo ""
 echo "========================================="
 echo "4. 测试应用层限流（全局限流）"
 echo "========================================="
+
+# 等待限流窗口重置（确保测试结果符合预期）
+echo -e "${YELLOW}等待 65 秒，让限流窗口重置（清除之前的请求计数）...${NC}"
+sleep 65
+
 echo -e "${BLUE}限制: 5 req/min${NC}"
 echo -e "${BLUE}测试: 发送 10 个请求，预期第 6 个开始触发限流${NC}"
 echo ""
@@ -400,9 +413,44 @@ for i in {1..6}; do
     METHOD="GET"
     BODY=""
 
-    STRING_TO_SIGN="${METHOD}\n${URI}\n${TIMESTAMP}\n${BODY}"
-    SIGNATURE=$(echo -n "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$SECRET_KEY" -binary | base64)
+    # 使用 printf 正确处理换行符
+    STRING_TO_SIGN=$(printf "%s\n%s\n%s\n%s" "$METHOD" "$URI" "$TIMESTAMP" "$BODY")
+    # 如果BODY为空，需要在末尾添加换行符（因为fmt.Sprintf会在最后加\n）
+    # 如果BODY非空，不需要添加（fmt.Sprintf不会在BODY后加\n）
+    if [ -z "$BODY" ]; then
+        # BODY为空，使用echo添加换行符
+        SIGNATURE=$(echo "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$SECRET_KEY" -binary | base64)
+    else
+        # BODY非空，使用printf不添加换行符
+        SIGNATURE=$(printf "%s" "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$SECRET_KEY" -binary | base64)
+    fi
     AUTH_HEADER="QINIU ${ACCESS_KEY}:${SIGNATURE}"
+
+    # 第一次请求时显示调试信息
+    if [ $i -eq 1 ]; then
+        echo "调试信息（第1个请求）："
+        echo "  Method: $METHOD"
+        echo "  URI: $URI"
+        echo "  Timestamp: $TIMESTAMP"
+        echo "  Body: (empty)"
+        echo "  AccessKey: $ACCESS_KEY"
+        echo "  SecretKey: ${SECRET_KEY:0:20}..."
+        echo "  Signature: ${SIGNATURE:0:30}..."
+        echo "  待签名字符串（cat -A格式）："
+        printf "%s\n%s\n%s\n%s" "$METHOD" "$URI" "$TIMESTAMP" "$BODY" | cat -A
+        echo ""
+    fi
+
+    # 获取完整响应以便调试
+    if [ $i -eq 1 ]; then
+        FULL_RESPONSE=$(curl -s -X GET "$BASE_URL$URI" \
+            -H "Authorization: $AUTH_HEADER" \
+            -H "X-Qiniu-Date: $TIMESTAMP")
+        HTTP_CODE=$(echo "$FULL_RESPONSE" | tail -1)
+        if echo "$FULL_RESPONSE" | grep -q "error"; then
+            echo "  错误响应: $FULL_RESPONSE"
+        fi
+    fi
 
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$BASE_URL$URI" \
         -H "Authorization: $AUTH_HEADER" \
