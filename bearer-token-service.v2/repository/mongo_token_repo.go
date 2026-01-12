@@ -275,17 +275,20 @@ func (r *MongoTokenRepository) VerifyTokenOwnership(ctx context.Context, tokenID
 // ========================================
 
 // generateTokenValue 生成 Token 值
+// 如果提供自定义 prefix，格式为 prefix-XXXXX；否则使用默认前缀 sk-XXXXX
 func generateTokenValue(prefix string) (string, error) {
-	// 如果没有提供自定义前缀，使用默认前缀
-	if prefix == "" {
-		prefix = interfaces.TokenPrefix
-	}
-
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return prefix + hex.EncodeToString(b), nil
+
+	// 如果没有提供自定义前缀，使用默认前缀（已包含分隔符）
+	if prefix == "" {
+		return interfaces.TokenPrefix + hex.EncodeToString(b), nil
+	}
+
+	// 自定义前缀加分隔符
+	return prefix + "-" + hex.EncodeToString(b), nil
 }
 
 // generateRandomID 生成随机 ID

@@ -56,3 +56,6 @@ backup/
 # Docker volumes
 mongodb_data/
 mongodb_config/
+tokenserv_test.log
+
+_cust

@@ -20,14 +20,14 @@ type Account struct {
 	UpdatedAt time.Time  `bson:"updated_at" json:"updated_at"`
 }
 
-// Token Bearer Token 模型（带权限控制）
+// Token Bearer Token 模型
 type Token struct {
 	ID          string     `bson:"_id,omitempty" json:"token_id"`
 	AccountID   string     `bson:"account_id" json:"account_id"`         // 关联到账户
 	Token       string     `bson:"token" json:"token"`                   // 实际的 token 值
 	Description string     `bson:"description" json:"description"`       // Token 描述
-	Scope       []string   `bson:"scope" json:"scope"`                   // 权限范围
 	RateLimit   *RateLimit `bson:"rate_limit,omitempty" json:"rate_limit,omitempty"`
+	IUID        string     `bson:"iuid,omitempty" json:"iuid,omitempty"` // IAM 用户ID（从 QiniuStub 认证中提取）
 	CreatedAt   time.Time  `bson:"created_at" json:"created_at"`
 	ExpiresAt   *time.Time `bson:"expires_at,omitempty" json:"expires_at,omitempty"` // nil 表示永不过期
 	IsActive    bool       `bson:"is_active" json:"is_active"`
@@ -90,7 +90,6 @@ type RegenerateSecretKeyResponse struct {
 // TokenCreateRequest 创建 Token 请求
 type TokenCreateRequest struct {
 	Description      string     `json:"description" binding:"required"`
-	Scope            []string   `json:"scope" binding:"required,min=1"`            // 至少一个权限
 	ExpiresInSeconds int64      `json:"expires_in_seconds,omitempty"`              // 0 表示永不过期，支持秒级精度
 	RateLimit        *RateLimit `json:"rate_limit,omitempty"`
 	Prefix           string     `json:"prefix,omitempty"`                          // 自定义 Token 前缀，默认 "sk-"
@@ -102,7 +101,6 @@ type TokenCreateResponse struct {
 	Token       string     `json:"token"`       // 完整 token，仅在创建时返回
 	AccountID   string     `json:"account_id"`
 	Description string     `json:"description"`
-	Scope       []string   `json:"scope"`
 	RateLimit   *RateLimit `json:"rate_limit,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"` // nil 表示永不过期
@@ -119,9 +117,8 @@ type TokenListResponse struct {
 // TokenBrief Token 摘要信息（隐藏完整 token）
 type TokenBrief struct {
 	TokenID       string     `json:"token_id"`
-	TokenPreview  string     `json:"token_preview"`  // 中间隐藏，如 "sk-abc123...******************************...xyz789"
+	TokenPreview  string     `json:"token_preview"`  // 中间隐藏，如 "sk-a1b2c3d4****e5f6g7h8"
 	Description   string     `json:"description"`
-	Scope         []string   `json:"scope"`
 	RateLimit     *RateLimit `json:"rate_limit,omitempty"`
 	CreatedAt     time.Time  `json:"created_at"`
 	ExpiresAt     *time.Time `json:"expires_at,omitempty"`  // nil 表示永不过期
@@ -138,16 +135,14 @@ type TokenUpdateStatusRequest struct {
 
 // TokenValidateRequest Token 验证请求
 type TokenValidateRequest struct {
-	Token         string `json:"-"`                                  // 从 Authorization header 提取
-	RequiredScope string `json:"required_scope,omitempty"`           // 可选：要求的权限
+	Token string `json:"-"` // 从 Authorization header 提取
 }
 
 // TokenValidateResponse Token 验证响应
 type TokenValidateResponse struct {
-	Valid            bool       `json:"valid"`
-	Message          string     `json:"message"`
-	TokenInfo        *TokenInfo `json:"token_info,omitempty"`
-	PermissionCheck  *PermissionCheckResult `json:"permission_check,omitempty"`
+	Valid     bool       `json:"valid"`
+	Message   string     `json:"message"`
+	TokenInfo *TokenInfo `json:"token_info,omitempty"`
 }
 
 // TokenInfo Token 基本信息（用于验证响应）
@@ -155,16 +150,10 @@ type TokenInfo struct {
 	TokenID    string     `json:"token_id"`
 	AccountID  string     `json:"account_id,omitempty"`  // HMAC 用户使用
 	UID        string     `json:"uid,omitempty"`         // QiniuStub 用户使用（从 account_id 提取）
-	Scope      []string   `json:"scope"`
+	IUID       string     `json:"iuid,omitempty"`        // IAM 用户ID（当请求中包含 iuid 时返回，用于标识IAM用户）
 	IsActive   bool       `json:"is_active"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`  // nil 表示永不过期
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"` // nil 表示从未使用
-}
-
-// PermissionCheckResult 权限检查结果
-type PermissionCheckResult struct {
-	Requested string `json:"requested"` // 请求的权限
-	Granted   bool   `json:"granted"`   // 是否授权
 }
 
 // TokenStatsResponse Token 使用统计响应
@@ -221,9 +210,6 @@ const (
 
 	// SecretKey Prefix (通用前缀)
 	SecretKeyPrefix = "SK_"
-
-	// Scope Wildcards
-	ScopeAll = "*"
 
 	// Audit Actions
 	AuditActionCreateToken    = "create_token"

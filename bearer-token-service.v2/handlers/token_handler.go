@@ -3,12 +3,16 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"bearer-token-service.v1/v2/auth"
 	"bearer-token-service.v1/v2/interfaces"
 	"github.com/gorilla/mux"
 )
+
+// prefixRegex 校验 prefix：只允许小写字母、数字、下划线
+var prefixRegex = regexp.MustCompile(`^[a-z0-9_]+$`)
 
 // TokenHandlerImpl Token 管理 Handler 实现
 type TokenHandlerImpl struct {
@@ -35,6 +39,18 @@ func (h *TokenHandlerImpl) CreateToken(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respondError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+
+	// 校验 prefix 参数
+	if req.Prefix != "" {
+		if len(req.Prefix) > 12 {
+			respondError(w, http.StatusBadRequest, "prefix length must not exceed 12 characters")
+			return
+		}
+		if !prefixRegex.MatchString(req.Prefix) {
+			respondError(w, http.StatusBadRequest, "prefix must contain only lowercase letters, numbers, and underscores")
+			return
+		}
 	}
 
 	resp, err := h.tokenService.CreateToken(r.Context(), accountID, &req)

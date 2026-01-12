@@ -5,13 +5,11 @@
 ### 1. 创建短期 Token（1小时过期）
 
 ```bash
-curl -X POST "http://localhost:8080/api/v2/tokens" \
-  -H "Authorization: QINIU ${ACCESS_KEY}:${SIGNATURE}" \
-  -H "X-Qiniu-Date: ${TIMESTAMP}" \
+curl -X POST "http://localhost:8081/api/v2/tokens" \
+  -H "Authorization: QiniuStub uid=1369077332&ut=1" \
   -H "Content-Type: application/json" \
   -d '{
     "description": "Short-lived token for testing",
-    "scope": ["storage:read"],
     "expires_in_seconds": 3600
   }'
 ```
@@ -25,7 +23,6 @@ curl -X POST "http://localhost:8080/api/v2/tokens" \
 ```json
 {
   "description": "Weekly access token",
-  "scope": ["storage:*"],
   "expires_in_seconds": 604800
 }
 ```
@@ -39,7 +36,6 @@ curl -X POST "http://localhost:8080/api/v2/tokens" \
 ```json
 {
   "description": "Production token",
-  "scope": ["storage:read", "cdn:refresh"],
   "expires_in_seconds": 7776000
 }
 ```
@@ -53,7 +49,6 @@ curl -X POST "http://localhost:8080/api/v2/tokens" \
 ```json
 {
   "description": "Permanent API token",
-  "scope": ["*"],
   "expires_in_seconds": 0
 }
 ```
@@ -122,43 +117,26 @@ echo "90天 = $(days_to_seconds 90) 秒"     # 7776000
 
 ## 完整创建流程示例
 
-### 步骤 1：准备参数
+### 使用 QiniuStub 认证创建 Token
 
 ```bash
-ACCESS_KEY="AK_f8e7d6c5b4a39281"
-SECRET_KEY="SK_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
-METHOD="POST"
-URI="/api/v2/tokens"
-TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-# 创建1小时有效期的 Token
-EXPIRES_IN_SECONDS=3600
-
-BODY=$(cat <<EOF
-{
-  "description": "1-hour temporary token",
-  "scope": ["storage:read"],
-  "expires_in_seconds": ${EXPIRES_IN_SECONDS}
-}
-EOF
-)
-```
-
-### 步骤 2：生成签名
-
-```bash
-STRING_TO_SIGN="${METHOD}\n${URI}\n${TIMESTAMP}\n${BODY}"
-SIGNATURE=$(echo -n "$STRING_TO_SIGN" | openssl dgst -sha256 -hmac "$SECRET_KEY" -binary | base64)
-```
-
-### 步骤 3：发送请求
-
-```bash
-curl -X POST "http://localhost:8080${URI}" \
-  -H "Authorization: QINIU ${ACCESS_KEY}:${SIGNATURE}" \
-  -H "X-Qiniu-Date: ${TIMESTAMP}" \
+# 主账户创建 Token
+curl -X POST "http://localhost:8081/api/v2/tokens" \
+  -H "Authorization: QiniuStub uid=1369077332&ut=1" \
   -H "Content-Type: application/json" \
-  -d "$BODY"
+  -d '{
+    "description": "1-hour temporary token",
+    "expires_in_seconds": 3600
+  }'
+
+# IAM 子账户创建 Token
+curl -X POST "http://localhost:8081/api/v2/tokens" \
+  -H "Authorization: QiniuStub uid=1369077332&ut=1&iuid=8901234" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "description": "IAM 1-hour token",
+    "expires_in_seconds": 3600
+  }'
 ```
 
 ### 预期响应
@@ -167,11 +145,10 @@ curl -X POST "http://localhost:8080${URI}" \
 {
   "token_id": "tk_xyz123",
   "token": "sk-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6...",
-  "account_id": "acc_1a2b3c4d5e6f",
+  "account_id": "qiniu_1369077332",
   "description": "1-hour temporary token",
-  "scope": ["storage:read"],
-  "created_at": "2025-12-26T10:00:00Z",
-  "expires_at": "2025-12-26T11:00:00Z",  # 1小时后
+  "created_at": "2026-01-12T10:00:00Z",
+  "expires_at": "2026-01-12T11:00:00Z",
   "is_active": true
 }
 ```
@@ -185,8 +162,7 @@ curl -X POST "http://localhost:8080${URI}" \
 ```json
 {
   "description": "Old version token",
-  "scope": ["storage:read"],
-  "expires_in_days": 1  // 只能设置整数天
+  "expires_in_days": 1
 }
 ```
 
@@ -197,8 +173,7 @@ curl -X POST "http://localhost:8080${URI}" \
 ```json
 {
   "description": "New version token",
-  "scope": ["storage:read"],
-  "expires_in_seconds": 3600  // 可精确到秒
+  "expires_in_seconds": 3600
 }
 ```
 
@@ -211,5 +186,5 @@ curl -X POST "http://localhost:8080${URI}" \
 ---
 
 **文档版本**: 2.0
-**更新日期**: 2025-12-26
-**更新内容**: 添加秒级精度过期时间支持
+**更新日期**: 2026-01-12
+**更新内容**: 简化认证方式，使用 QiniuStub 认证

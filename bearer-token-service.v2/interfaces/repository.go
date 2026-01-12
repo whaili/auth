@@ -129,26 +129,11 @@ type TokenService interface {
 
 // ValidationService Token 验证服务接口
 type ValidationService interface {
-	// ValidateToken 验证 Token（带权限检查）
+	// ValidateToken 验证 Token
 	ValidateToken(ctx context.Context, req *TokenValidateRequest) (*TokenValidateResponse, error)
-
-	// ValidateTokenWithScope 验证 Token 并检查特定权限
-	ValidateTokenWithScope(ctx context.Context, tokenValue string, requiredScope string) (*TokenValidateResponse, error)
 
 	// RecordTokenUsage 记录 Token 使用
 	RecordTokenUsage(ctx context.Context, tokenValue string) error
-}
-
-// PermissionService 权限验证服务接口
-type PermissionService interface {
-	// HasPermission 检查是否有权限
-	HasPermission(tokenScopes []string, requiredScope string) bool
-
-	// ValidateScopes 验证 Scope 格式是否合法
-	ValidateScopes(scopes []string) error
-
-	// ExpandWildcardScopes 展开通配符权限
-	ExpandWildcardScopes(scopes []string) []string
 }
 
 // AuditService 审计服务接口

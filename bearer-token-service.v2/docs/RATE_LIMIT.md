@@ -76,7 +76,6 @@ export ENABLE_TOKEN_RATE_LIMIT=true
 POST /api/v2/tokens
 {
   "description": "Limited token",
-  "scope": ["storage:write"],
   "expires_in_seconds": 3600,
   "rate_limit": {
     "requests_per_minute": 100,

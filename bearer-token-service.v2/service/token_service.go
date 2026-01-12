@@ -3,48 +3,48 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
+	"bearer-token-service.v1/v2/auth"
 	"bearer-token-service.v1/v2/interfaces"
-	"bearer-token-service.v1/v2/permission"
 )
 
 // TokenServiceImpl Token 管理服务实现
 type TokenServiceImpl struct {
-	tokenRepo     interfaces.TokenRepository
-	auditRepo     interfaces.AuditLogRepository
-	scopeValidator *permission.ScopeValidator
+	tokenRepo interfaces.TokenRepository
+	auditRepo interfaces.AuditLogRepository
 }
 
 // NewTokenService 创建 Token 服务实例
 func NewTokenService(tokenRepo interfaces.TokenRepository, auditRepo interfaces.AuditLogRepository) *TokenServiceImpl {
 	return &TokenServiceImpl{
-		tokenRepo:     tokenRepo,
-		auditRepo:     auditRepo,
-		scopeValidator: permission.NewScopeValidator(),
+		tokenRepo: tokenRepo,
+		auditRepo: auditRepo,
 	}
 }
 
 // CreateToken 创建新 Token
 func (s *TokenServiceImpl) CreateToken(ctx context.Context, accountID string, req *interfaces.TokenCreateRequest) (*interfaces.TokenCreateResponse, error) {
-	// 1. 验证 Scope 格式
-	if err := s.scopeValidator.ValidateScopes(req.Scope); err != nil {
-		return nil, err
-	}
-
-	// 2. 计算过期时间（秒级精度）
+	// 1. 计算过期时间（秒级精度）
 	var expiresAt *time.Time
 	if req.ExpiresInSeconds > 0 {
 		t := time.Now().Add(time.Duration(req.ExpiresInSeconds) * time.Second)
 		expiresAt = &t
 	}
 
+	// 2. 从 Context 中提取 IUID（如果是 QiniuStub 认证）
+	var iuid string
+	if qstubUser, ok := ctx.Value("qstub_user").(*auth.QstubUserInfo); ok {
+		iuid = qstubUser.IamUid
+	}
+
 	// 3. 创建 Token 对象
 	token := &interfaces.Token{
 		AccountID:   accountID, // 关联到账户（租户隔离）
 		Description: req.Description,
-		Scope:       req.Scope,
 		RateLimit:   req.RateLimit,
+		IUID:        iuid,      // 保存 IUID（如果存在）
 		ExpiresAt:   expiresAt,
 		IsActive:    true,
 		Prefix:      req.Prefix, // 自定义前缀
@@ -60,7 +60,6 @@ func (s *TokenServiceImpl) CreateToken(ctx context.Context, accountID string, re
 	// 4. 记录审计日志
 	s.logAction(ctx, accountID, interfaces.AuditActionCreateToken, token.ID, interfaces.AuditResultSuccess, "", map[string]interface{}{
 		"description": req.Description,
-		"scope":       req.Scope,
 	})
 
 	// 5. 返回响应（包含完整 Token，仅此一次）
@@ -69,7 +68,6 @@ func (s *TokenServiceImpl) CreateToken(ctx context.Context, accountID string, re
 		Token:       token.Token, // 完整 Token，仅在创建时返回
 		AccountID:   token.AccountID,
 		Description: token.Description,
-		Scope:       token.Scope,
 		RateLimit:   token.RateLimit,
 		CreatedAt:   token.CreatedAt,
 		ExpiresAt:   token.ExpiresAt,
@@ -97,9 +95,8 @@ func (s *TokenServiceImpl) ListTokens(ctx context.Context, accountID string, act
 	for _, token := range tokens {
 		brief := interfaces.TokenBrief{
 			TokenID:       token.ID,
-			TokenPreview:  token.Token, // hideToken(token.Token), // 隐藏部分 Token - 已注释，返回明文
+			TokenPreview:  hideToken(token.Token),
 			Description:   token.Description,
-			Scope:         token.Scope,
 			RateLimit:     token.RateLimit,
 			CreatedAt:     token.CreatedAt,
 			IsActive:      token.IsActive,
@@ -141,8 +138,8 @@ func (s *TokenServiceImpl) GetTokenInfo(ctx context.Context, accountID string, t
 		return nil, errors.New("permission denied: token does not belong to this account")
 	}
 
-	// 隐藏完整 Token - 已注释，返回明文
-	// token.Token = hideToken(token.Token)
+	// 隐藏完整 Token
+	token.Token = hideToken(token.Token)
 
 	return token, nil
 }
@@ -246,24 +243,33 @@ func (s *TokenServiceImpl) logAction(ctx context.Context, accountID, action, res
 	s.auditRepo.Create(ctx, log)
 }
 
-// hideToken 隐藏 Token 的中间部分，保留前后明文
-// 示例: sk-abc123...***************************...xyz789
+// hideToken 隐藏 Token 的中间部分
+// 格式: prefix全部显示 + 8字符 + **** + 8字符
+// 示例: sk-a1b2c3d4****e5f6g7h8
 func hideToken(token string) string {
+	// 找到 prefix 分隔符位置
+	prefixEnd := strings.Index(token, "-")
+	if prefixEnd == -1 {
+		prefixEnd = 0
+	} else {
+		prefixEnd++ // 包含 "-"
+	}
+
+	suffix := token[prefixEnd:] // prefix 之后的部分
+
 	const (
-		hiddenStart  = 15 // 从第 15 个字符开始隐藏
-		hiddenLength = 30 // 隐藏 30 个字符
+		showBefore = 8 // 显示前 8 个字符
+		showAfter  = 8 // 显示后 8 个字符
+		maskLen    = 4 // 4 个星号
 	)
 
-	if len(token) < hiddenStart+hiddenLength {
-		return token // Token 太短，直接返回
+	// 如果 suffix 太短，直接返回原 token
+	if len(suffix) < showBefore+showAfter {
+		return token
 	}
 
-	// 将中间部分替换为星号
-	bytes := []byte(token)
-	for i := hiddenStart; i < hiddenStart+hiddenLength && i < len(bytes); i++ {
-		bytes[i] = '*'
-	}
-	return string(bytes)
+	// prefix + 前8字符 + **** + 后8字符
+	return token[:prefixEnd] + suffix[:showBefore] + strings.Repeat("*", maskLen) + suffix[len(suffix)-showAfter:]
 }
 
 // calculateTokenStatus 计算 Token 的综合状态

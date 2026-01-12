@@ -5,19 +5,26 @@ info:
     认证服务 API
 
     ## 认证方式
-
-    ### HMAC 签名认证
-    Token 管理 API 需要使用 HMAC-SHA256 签名认证。
-
-    #### 签名步骤
-    1. 构建待签名字符串: `<HTTP_METHOD>\n<URI_PATH>\n<TIMESTAMP>\n<REQUEST_BODY>`
-    2. 使用 SecretKey 生成 HMAC-SHA256 签名
-    3. 构造 Authorization Header: `QINIU <ACCESS_KEY>:<SIGNATURE>`
-
     ### QiniuStub 认证
     七牛内部服务使用 QiniuStub 认证。
 
-    格式: `QiniuStub uid={用户ID}&ut={用户类型}`
+    #### 基本格式
+    `QiniuStub uid={用户ID}&ut={用户类型}`
+
+    #### 完整格式（支持更多参数）
+    ```
+    QiniuStub uid={用户ID}&ut={用户类型}[&app={应用ID}][&iuid={IAM用户ID}][&suid={代理用户ID}][&sut={代理用户类型}][&ak={AccessKey}][&eu={终端用户信息}]
+    ```
+
+    参数说明：
+    - `uid`: （必填）用户ID
+    - `ut`: （必填）用户类型
+    - `app`: （可选）应用ID（Appid）
+    - `iuid`: （可选）IAM 用户ID（IamUid）
+    - `suid`: （可选）代理用户ID（Sudoer）
+    - `sut`: （可选）代理用户类型（UtypeSu），仅当 suid 存在时有效
+    - `ak`: （可选）AccessKey
+    - `eu`: （可选）终端用户信息（EndUser）
   version: 2.0.0
   contact:
     name: API Support
@@ -27,7 +34,7 @@ info:
 servers:
   - url: http://localhost:8080
     description: 本地开发环境
-  - url: https://api.example.com
+  - url: http://bearer.qiniu.io
     description: 生产环境
 
 tags:
@@ -62,11 +69,23 @@ paths:
   /api/v2/tokens:
     post:
       summary: 创建 Bearer Token
-      description: 创建一个新的 Bearer Token，并指定权限范围（Scope）
+      description: |
+        创建一个新的 Bearer Token。
+
+        **认证方式**: QiniuStub 认证
+
+        **主账户示例**:
+        ```
+        Authorization: QiniuStub uid=1369077332&ut=1
+        ```
+
+        **IAM 子账户示例**:
+        ```
+        Authorization: QiniuStub uid=1369077332&ut=1&iuid=8901234
+        ```
       tags:
         - Token 管理
       security:
-        - HMACAuth: []
         - QstubAuth: []
       requestBody:
         required: true
@@ -76,26 +95,19 @@ paths:
               type: object
               required:
                 - description
-                - scope
               properties:
                 description:
                   type: string
                   description: Token 描述
-                  example: Production read-only token
-                scope:
-                  type: array
-                  description: 权限范围，支持通配符
-                  items:
-                    type: string
-                  example: ["storage:read", "cdn:refresh"]
+                  example: Production token
                 expires_in_seconds:
                   type: integer
                   description: 过期时间（秒），0 表示永不过期
                   example: 7776000
                 prefix:
                   type: string
-                  description: 自定义 Token 前缀（默认 sk-）
-                  example: mk_
+                  description: 自定义 Token 前缀（仅小写字母，系统自动添加分隔线，如 mk 生成 mk-xxx）
+                  example: mk
                 rate_limit:
                   type: object
                   description: API 频率限制
@@ -121,7 +133,6 @@ paths:
       tags:
         - Token 管理
       security:
-        - HMACAuth: []
         - QstubAuth: []
       parameters:
         - name: active_only
@@ -171,7 +182,6 @@ paths:
       tags:
         - Token 管理
       security:
-        - HMACAuth: []
         - QstubAuth: []
       parameters:
         - name: token_id
@@ -199,7 +209,6 @@ paths:
       tags:
         - Token 管理
       security:
-        - HMACAuth: []
         - QstubAuth: []
       parameters:
         - name: token_id
@@ -232,7 +241,6 @@ paths:
       tags:
         - Token 管理
       security:
-        - HMACAuth: []
         - QstubAuth: []
       parameters:
         - name: token_id
@@ -285,7 +293,6 @@ paths:
       tags:
         - Token 管理
       security:
-        - HMACAuth: []
         - QstubAuth: []
       parameters:
         - name: token_id
@@ -325,21 +332,11 @@ paths:
   /api/v2/validate:
     post:
       summary: 验证 Bearer Token
-      description: 验证 Token 的有效性，并可选地检查特定权限
+      description: 验证 Token 的有效性
       tags:
         - Token 验证
       security:
         - BearerAuth: []
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                required_scope:
-                  type: string
-                  description: 可选，要求的权限
-                  example: storage:read
       responses:
         '200':
           description: Token 验证成功
@@ -363,11 +360,10 @@ paths:
                       uid:
                         type: string
                         example: "1234567"
-                      scope:
-                        type: array
-                        items:
-                          type: string
-                        example: ["storage:read", "cdn:refresh"]
+                      iuid:
+                        type: string
+                        description: IAM 用户ID（当请求中包含 iuid 时返回，用于标识IAM用户）
+                        example: "8901234"
                       is_active:
                         type: boolean
                         example: true
@@ -375,15 +371,6 @@ paths:
                         type: string
                         format: date-time
                         example: 2026-03-25T10:00:00Z
-                  permission_check:
-                    type: object
-                    properties:
-                      requested:
-                        type: string
-                        example: storage:read
-                      granted:
-                        type: boolean
-                        example: true
         '401':
           description: Token 验证失败
           content:
@@ -405,7 +392,6 @@ paths:
       tags:
         - 审计日志
       security:
-        - HMACAuth: []
         - QstubAuth: []
       parameters:
         - name: action
@@ -466,17 +452,6 @@ paths:
 
 components:
   securitySchemes:
-    HMACAuth:
-      type: apiKey
-      in: header
-      name: Authorization
-      description: |
-        HMAC 签名认证
-
-        格式: `QINIU <ACCESS_KEY>:<SIGNATURE>`
-
-        需要同时提供 X-Qiniu-Date 头部
-
     QstubAuth:
       type: apiKey
       in: header
@@ -484,7 +459,11 @@ components:
       description: |
         QiniuStub 认证（七牛内部服务）
 
-        格式: `QiniuStub uid=1369077332&ut=1`
+        基本格式: `QiniuStub uid=1369077332&ut=1`
+
+        完整格式示例: `QiniuStub uid=1369077332&ut=1&app=100&suid=9876543&sut=2&ak=myAccessKey&eu=enduser@example.com`
+
+        可选参数包括: app, iuid, suid, sut, ak, eu
 
     BearerAuth:
       type: http
@@ -530,18 +509,13 @@ components:
           example: tk_9z8y7x6w5v4u
         token:
           type: string
-          example: mk_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2
+          example: mk-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2
         uid:
           type: string
           example: "1234567"
         description:
           type: string
-          example: Production read-only token
-        scope:
-          type: array
-          items:
-            type: string
-          example: ["storage:read", "cdn:refresh"]
+          example: Production token
         rate_limit:
           type: object
           properties:
@@ -568,15 +542,10 @@ components:
           example: tk_9z8y7x6w5v4u
         token_preview:
           type: string
-          example: sk-a1b2c3d4e5f6g7******************************c9d0e1f2
+          example: sk-a1b2c3d4****e5f6g7h8
         description:
           type: string
-          example: Production read-only token
-        scope:
-          type: array
-          items:
-            type: string
-          example: ["storage:read", "cdn:refresh"]
+          example: Production token
         created_at:
           type: string
           format: date-time

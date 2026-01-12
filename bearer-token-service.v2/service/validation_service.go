@@ -8,24 +8,21 @@ import (
 	"time"
 
 	"bearer-token-service.v1/v2/interfaces"
-	"bearer-token-service.v1/v2/permission"
 )
 
 // ValidationServiceImpl Token 验证服务实现
 type ValidationServiceImpl struct {
-	tokenRepo      interfaces.TokenRepository
-	scopeValidator *permission.ScopeValidator
+	tokenRepo interfaces.TokenRepository
 }
 
 // NewValidationService 创建验证服务实例
 func NewValidationService(tokenRepo interfaces.TokenRepository) *ValidationServiceImpl {
 	return &ValidationServiceImpl{
-		tokenRepo:      tokenRepo,
-		scopeValidator: permission.NewScopeValidator(),
+		tokenRepo: tokenRepo,
 	}
 }
 
-// ValidateToken 验证 Token（带权限检查）
+// ValidateToken 验证 Token
 func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfaces.TokenValidateRequest) (*interfaces.TokenValidateResponse, error) {
 	// 1. 查询 Token
 	token, err := s.tokenRepo.GetByTokenValue(ctx, req.Token)
@@ -59,28 +56,9 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 		}, nil
 	}
 
-	// 4. 如果指定了 RequiredScope，检查权限
-	var permissionCheck *interfaces.PermissionCheckResult
-	if req.RequiredScope != "" {
-		granted := s.scopeValidator.HasPermission(token.Scope, req.RequiredScope)
-		permissionCheck = &interfaces.PermissionCheckResult{
-			Requested: req.RequiredScope,
-			Granted:   granted,
-		}
-
-		if !granted {
-			return &interfaces.TokenValidateResponse{
-				Valid:            false,
-				Message:          "Permission denied",
-				PermissionCheck:  permissionCheck,
-			}, nil
-		}
-	}
-
-	// 5. 验证通过，返回 Token 信息
+	// 4. 验证通过，返回 Token 信息
 	tokenInfo := &interfaces.TokenInfo{
 		TokenID:  token.ID,
-		Scope:    token.Scope,
 		IsActive: token.IsActive,
 	}
 
@@ -94,27 +72,19 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 
 	// 根据 account_id 格式判断用户类型
 	if uid, isQiniuStub := extractUIDFromAccountID(token.AccountID); isQiniuStub {
-		// QiniuStub 用户：返回 UID
+		// QiniuStub 用户：返回 UID 和 IUID（如果存在）
 		tokenInfo.UID = uid
+		tokenInfo.IUID = token.IUID // 从 Token 中读取 IUID
 	} else {
 		// HMAC 用户：返回 AccountID
 		tokenInfo.AccountID = token.AccountID
 	}
 
 	return &interfaces.TokenValidateResponse{
-		Valid:           true,
-		Message:         "Token is valid",
-		TokenInfo:       tokenInfo,
-		PermissionCheck: permissionCheck,
+		Valid:     true,
+		Message:   "Token is valid",
+		TokenInfo: tokenInfo,
 	}, nil
-}
-
-// ValidateTokenWithScope 验证 Token 并检查特定权限
-func (s *ValidationServiceImpl) ValidateTokenWithScope(ctx context.Context, tokenValue string, requiredScope string) (*interfaces.TokenValidateResponse, error) {
-	return s.ValidateToken(ctx, &interfaces.TokenValidateRequest{
-		Token:         tokenValue,
-		RequiredScope: requiredScope,
-	})
 }
 
 // RecordTokenUsage 记录 Token 使用
@@ -149,3 +119,4 @@ func extractUIDFromAccountID(accountID string) (string, bool) {
 
 	return uidStr, true
 }
+

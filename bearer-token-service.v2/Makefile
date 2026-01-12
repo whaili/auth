@@ -144,17 +144,81 @@ config: ## 查看配置（验证环境变量）
 # 测试
 # ========================================
 
-test: ## 运行 API 测试
-	@echo "$(COLOR_INFO)运行测试...$(COLOR_RESET)"
-	@if [ -f tests/test_api.sh ]; then \
-		cd tests && bash test_api.sh; \
-	else \
-		echo "$(COLOR_WARNING)⚠️  测试脚本不存在: tests/test_api.sh$(COLOR_RESET)"; \
+test: ## 运行 API 测试（自动检查和启动测试环境）
+	@echo "$(COLOR_INFO)========================================$(COLOR_RESET)"
+	@echo "$(COLOR_INFO)准备测试环境...$(COLOR_RESET)"
+	@echo "$(COLOR_INFO)========================================$(COLOR_RESET)"
+	@echo ""
+	@# 1. 检查测试脚本是否存在
+	@if [ ! -f tests/test_qstub_api.sh ]; then \
+		echo "$(COLOR_ERROR)❌ 测试脚本不存在: tests/test_qstub_api.sh$(COLOR_RESET)"; \
+		exit 1; \
 	fi
+	@# 2. 检查 MongoDB 容器是否运行
+	@echo "$(COLOR_INFO)检查 MongoDB 容器...$(COLOR_RESET)"
+	@if ! sudo docker ps | grep -q bearer-token-mongodb; then \
+		echo "$(COLOR_WARNING)⚠️  MongoDB 容器未运行，正在启动...$(COLOR_RESET)"; \
+		sudo docker start bearer-token-mongodb 2>/dev/null || \
+		(echo "$(COLOR_ERROR)❌ 无法启动 MongoDB 容器，请先运行: docker-compose up -d mongodb$(COLOR_RESET)" && exit 1); \
+		sleep 3; \
+	fi
+	@echo "$(COLOR_SUCCESS)✅ MongoDB 容器运行中$(COLOR_RESET)"
+	@# 3. 检查二进制文件是否存在
+	@echo "$(COLOR_INFO)检查服务二进制文件...$(COLOR_RESET)"
+	@if [ ! -f bin/tokenserv ]; then \
+		echo "$(COLOR_WARNING)⚠️  二进制文件不存在，正在编译...$(COLOR_RESET)"; \
+		$(MAKE) compile; \
+	fi
+	@echo "$(COLOR_SUCCESS)✅ 二进制文件存在$(COLOR_RESET)"
+	@# 4. 检查服务是否运行
+	@echo "$(COLOR_INFO)检查服务状态...$(COLOR_RESET)"
+	@if ! curl -s http://localhost:8081/health > /dev/null 2>&1; then \
+		echo "$(COLOR_WARNING)⚠️  服务未运行，正在启动本地服务...$(COLOR_RESET)"; \
+		rm -f $(CURDIR)/tokenserv_test.log; \
+		nohup ./tests/start_local.sh > $(CURDIR)/tokenserv_test.log 2>&1 & \
+		echo "$(COLOR_INFO)等待服务启动...$(COLOR_RESET)"; \
+		for i in 1 2 3 4 5; do \
+			sleep 1; \
+			if curl -s http://localhost:8081/health > /dev/null 2>&1; then \
+				break; \
+			fi; \
+		done; \
+		if ! curl -s http://localhost:8081/health > /dev/null 2>&1; then \
+			echo "$(COLOR_ERROR)❌ 服务启动失败，请检查日志: $(CURDIR)/tokenserv_test.log$(COLOR_RESET)"; \
+			tail -20 $(CURDIR)/tokenserv_test.log; \
+			exit 1; \
+		fi; \
+	fi
+	@echo "$(COLOR_SUCCESS)✅ 服务运行中 (http://localhost:8081)$(COLOR_RESET)"
+	@echo ""
+	@# 5. 运行测试
+	@echo "$(COLOR_INFO)========================================$(COLOR_RESET)"
+	@echo "$(COLOR_INFO)开始运行测试...$(COLOR_RESET)"
+	@echo "$(COLOR_INFO)========================================$(COLOR_RESET)"
+	@echo ""
+	@cd tests && bash test_qstub_api.sh
+	@echo ""
+	@echo "$(COLOR_SUCCESS)========================================$(COLOR_RESET)"
+	@echo "$(COLOR_SUCCESS)✅ 测试完成$(COLOR_RESET)"
+	@echo "$(COLOR_SUCCESS)========================================$(COLOR_RESET)"
+
+test-stop: ## 停止测试服务
+	@echo "$(COLOR_INFO)停止测试服务...$(COLOR_RESET)"
+	@pkill -f "bin/tokenserv" 2>/dev/null || true
+	@echo "$(COLOR_SUCCESS)✅ 测试服务已停止$(COLOR_RESET)"
+
+test-clean: ## 清理测试环境和数据
+	@echo "$(COLOR_WARNING)清理测试环境...$(COLOR_RESET)"
+	@# 停止服务
+	@pkill -f "bin/tokenserv" 2>/dev/null || true
+	@# 清理测试数据库（可选）
+	@echo "$(COLOR_INFO)如需清理 MongoDB 测试数据，请手动执行:$(COLOR_RESET)"
+	@echo "  sudo docker exec bearer-token-mongodb mongosh -u admin -p 123456 --eval 'use token_service_v2; db.dropDatabase()'"
+	@echo "$(COLOR_SUCCESS)✅ 测试环境已清理$(COLOR_RESET)"
 
 health: ## 健康检查
 	@echo "$(COLOR_INFO)健康检查...$(COLOR_RESET)"
-	@curl -s http://localhost/health | jq . && \
+	@curl -s http://localhost:8081/health | jq . && \
 		echo "$(COLOR_SUCCESS)✅ 服务健康$(COLOR_RESET)" || \
 		echo "$(COLOR_ERROR)❌ 服务异常$(COLOR_RESET)"
 
@@ -323,9 +387,8 @@ package: ## 打包生产部署文件（镜像 + 配置）
 	@echo "$(COLOR_INFO)5. 生成测试脚本...$(COLOR_RESET)"
 	@rm -rf dist/deploy/tests
 	@cp -r tests dist/deploy/
-	@sed -i 's|http://localhost:8081|http://localhost|g' dist/deploy/tests/test_api.sh
-	@sed -i 's|http://localhost:8081|http://localhost|g' dist/deploy/tests/hmac_client.py
-	@rm -f dist/deploy/tests/QSTUB_TESTS.md
+	@sed -i 's|http://localhost:8081|http://localhost|g' dist/deploy/tests/test_qstub_api.sh 2>/dev/null || true
+	@sed -i 's|http://localhost:8081|http://localhost|g' dist/deploy/tests/test_rate_limit.sh 2>/dev/null || true
 	@echo "  - tests/ (已调整为生产环境配置: http://localhost)"
 	@echo ""
 	@echo "$(COLOR_INFO)6. 检查部署说明...$(COLOR_RESET)"

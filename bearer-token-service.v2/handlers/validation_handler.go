@@ -32,18 +32,9 @@ func (h *ValidationHandlerImpl) ValidateToken(w http.ResponseWriter, r *http.Req
 
 	tokenValue := strings.TrimPrefix(authHeader, "Bearer ")
 
-	// 2. 解析请求体（可选的 required_scope）
-	var requestBody struct {
-		RequiredScope string `json:"required_scope"`
-	}
-	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&requestBody)
-	}
-
-	// 3. 调用验证服务
+	// 2. 调用验证服务
 	req := &interfaces.TokenValidateRequest{
-		Token:         tokenValue,
-		RequiredScope: requestBody.RequiredScope,
+		Token: tokenValue,
 	}
 
 	resp, err := h.validationService.ValidateToken(r.Context(), req)
@@ -52,7 +43,7 @@ func (h *ValidationHandlerImpl) ValidateToken(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// 4. 如果验证失败，返回 401
+	// 3. 如果验证失败，返回 401
 	if !resp.Valid {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -60,9 +51,9 @@ func (h *ValidationHandlerImpl) ValidateToken(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// 5. 记录使用（异步，不影响响应）
+	// 4. 记录使用（异步，不影响响应）
 	go h.validationService.RecordTokenUsage(r.Context(), tokenValue)
 
-	// 6. 返回成功响应
+	// 5. 返回成功响应
 	respondJSON(w, http.StatusOK, resp)
 }

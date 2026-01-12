@@ -6,20 +6,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // ========================================
-// 统一认证中间件（支持多种认证方式）
+// QiniuStub 认证中间件
 // ========================================
 
-// UnifiedAuthMiddleware 统一认证中间件
-// 支持：
-// 1. HMAC 签名认证（AccessKey/SecretKey）
-// 2. Qstub Bearer Token 认证（七牛内部用户系统）
-type UnifiedAuthMiddleware struct {
-	hmacAuth       *HMACMiddleware
-	accountFetcher AccountFetcher
+// QstubAuthMiddleware QiniuStub 认证中间件
+// 只支持 QiniuStub 认证（七牛内部用户系统）
+type QstubAuthMiddleware struct {
 	qiniuUIDMapper QiniuUIDMapper // 将七牛 UID 映射到 account_id
 }
 
@@ -33,64 +28,53 @@ type QiniuUIDMapper interface {
 
 // QstubUserInfo 七牛 Qstub 用户信息
 type QstubUserInfo struct {
-	UID     string `json:"uid"`             // 必需: 用户ID
+	UID     string `json:"uid"`             // 必需: 用户ID (主账户)
 	Utype   uint32 `json:"ut"`              // 可选: 用户类型
 	Appid   uint64 `json:"app,omitempty"`   // 可选: 应用ID(未使用)
+	IamUid  string `json:"iuid,omitempty"`  // 可选: IAM 用户ID (子账户)
 	Access  string `json:"ak,omitempty"`    // 可选: AccessKey(未使用)
 	EndUser string `json:"eu,omitempty"`    // 可选: 最终用户(未使用)
 	Email   string `json:"email,omitempty"` // 可选: 邮箱
 }
 
-// NewUnifiedAuthMiddleware 创建统一认证中间件
-func NewUnifiedAuthMiddleware(
-	accountFetcher AccountFetcher,
-	qiniuUIDMapper QiniuUIDMapper,
-	timestampTolerance time.Duration,
-) *UnifiedAuthMiddleware {
-	return &UnifiedAuthMiddleware{
-		hmacAuth:       NewHMACMiddleware(accountFetcher, timestampTolerance),
-		accountFetcher: accountFetcher,
+// AccountInfo 简化的账户信息
+type AccountInfo struct {
+	ID    string
+	Email string
+}
+
+// NewQstubAuthMiddleware 创建 QiniuStub 认证中间件
+func NewQstubAuthMiddleware(qiniuUIDMapper QiniuUIDMapper) *QstubAuthMiddleware {
+	return &QstubAuthMiddleware{
 		qiniuUIDMapper: qiniuUIDMapper,
 	}
 }
 
-// Authenticate 统一认证处理器
+// Authenticate QiniuStub 认证处理器
 //
-// 认证优先级：
-// 1. 如果存在 X-Qiniu-Date 头，使用 HMAC 签名认证
-// 2. 如果 Authorization 以 "QiniuStub " 开头，使用 QiniuStub 认证（URL 参数格式）
-// 3. 否则返回 401
-func (m *UnifiedAuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
+// 认证方式：
+// Authorization 头必须以 "QiniuStub " 开头，格式为 URL 参数格式
+//
+// 支持两种格式：
+// 1. 主账户格式: QiniuStub uid=12345&ut=1
+// 2. IAM 子账户格式: QiniuStub uid=12345&ut=1&iuid=8901234
+func (m *QstubAuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
-		timestampHeader := r.Header.Get("X-Qiniu-Date")
 
-		// 策略 1: HMAC 签名认证（优先级最高）
-		if timestampHeader != "" {
-			// 使用 HMAC 认证
-			m.hmacAuth.Authenticate(next).ServeHTTP(w, r)
+		// 检查是否为 QiniuStub 认证
+		if !strings.HasPrefix(authHeader, "QiniuStub ") {
+			m.respondError(w, http.StatusUnauthorized, "missing or invalid Authorization header, expected 'QiniuStub uid=xxx&ut=x'")
 			return
 		}
 
-		// 策略 2: QiniuStub 认证（URL 参数格式）
-		if strings.HasPrefix(authHeader, "QiniuStub ") {
-			m.authenticateQstub(w, r, next)
-			return
-		}
-
-		// 策略 3: 如果是 QINIU 格式但没有时间戳，提示错误
-		if strings.HasPrefix(authHeader, "QINIU ") {
-			m.respondError(w, http.StatusUnauthorized, "missing X-Qiniu-Date header for HMAC authentication")
-			return
-		}
-
-		// 无法识别的认证方式
-		m.respondError(w, http.StatusUnauthorized, "unsupported authentication method")
+		// 处理 QiniuStub 认证
+		m.authenticateQstub(w, r, next)
 	}
 }
 
 // authenticateQstub 处理 Qstub Bearer Token 认证
-func (m *UnifiedAuthMiddleware) authenticateQstub(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
+func (m *QstubAuthMiddleware) authenticateQstub(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
 	authHeader := r.Header.Get("Authorization")
 
 	// 1. 解析 Qstub Token
@@ -123,14 +107,15 @@ func (m *UnifiedAuthMiddleware) authenticateQstub(w http.ResponseWriter, r *http
 	ctx := context.WithValue(r.Context(), "account", account)
 	ctx = context.WithValue(ctx, "account_id", accountID)
 	ctx = context.WithValue(ctx, "auth_method", "qstub") // 标记认证方式
+	ctx = context.WithValue(ctx, "qstub_user", qstubUser) // 存储完整的 Qstub 用户信息
 
 	// 5. 调用下一个 handler
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // parseQstubToken 解析 QiniuStub Token
-// 格式: "QiniuStub uid=12345&ut=1"
-func (m *UnifiedAuthMiddleware) parseQstubToken(authHeader string) (*QstubUserInfo, error) {
+// 格式: "QiniuStub uid=12345&ut=1" 或 "QiniuStub uid=12345&ut=1&iuid=8901234"
+func (m *QstubAuthMiddleware) parseQstubToken(authHeader string) (*QstubUserInfo, error) {
 	if !strings.HasPrefix(authHeader, "QiniuStub ") {
 		return nil, fmt.Errorf("invalid qstub token format")
 	}
@@ -138,8 +123,8 @@ func (m *UnifiedAuthMiddleware) parseQstubToken(authHeader string) (*QstubUserIn
 }
 
 // parseQstubURLParams 解析 URL 参数格式的 QiniuStub Token
-// 例如: "QiniuStub uid=12345&ut=1&app=1"
-func (m *UnifiedAuthMiddleware) parseQstubURLParams(authHeader string) (*QstubUserInfo, error) {
+// 例如: "QiniuStub uid=12345&ut=1&iuid=8901234"
+func (m *QstubAuthMiddleware) parseQstubURLParams(authHeader string) (*QstubUserInfo, error) {
 	// 移除 "QiniuStub " 前缀
 	params := strings.TrimPrefix(authHeader, "QiniuStub ")
 	params = strings.TrimSpace(params)
@@ -170,6 +155,8 @@ func (m *UnifiedAuthMiddleware) parseQstubURLParams(authHeader string) (*QstubUs
 			if app, err := strconv.ParseUint(value, 10, 64); err == nil {
 				userInfo.Appid = app
 			}
+		case "iuid":
+			userInfo.IamUid = value
 		case "ak":
 			userInfo.Access = value
 		case "eu":
@@ -180,29 +167,37 @@ func (m *UnifiedAuthMiddleware) parseQstubURLParams(authHeader string) (*QstubUs
 	}
 
 	if userInfo.UID == "" {
-		return nil, fmt.Errorf("uid is empty")
+		return nil, fmt.Errorf("uid is required")
 	}
 
 	return userInfo, nil
 }
 
-
 // respondError 返回错误响应
-func (m *UnifiedAuthMiddleware) respondError(w http.ResponseWriter, statusCode int, message string) {
+func (m *QstubAuthMiddleware) respondError(w http.ResponseWriter, statusCode int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	w.Write([]byte(`{"error": "` + message + `"}`))
 }
 
 // ========================================
-// 辅助函数：提取认证方式
+// 辅助函数：提取认证信息
 // ========================================
 
 // ExtractAuthMethod 从 Context 中提取认证方式
 func ExtractAuthMethod(ctx context.Context) string {
 	method, ok := ctx.Value("auth_method").(string)
 	if !ok {
-		return "hmac" // 默认为 HMAC
+		return "qstub" // 默认为 qstub
 	}
 	return method
+}
+
+// ExtractQstubUser 从 Context 中提取 Qstub 用户信息
+func ExtractQstubUser(ctx context.Context) *QstubUserInfo {
+	qstubUser, ok := ctx.Value("qstub_user").(*QstubUserInfo)
+	if !ok {
+		return nil
+	}
+	return qstubUser
 }

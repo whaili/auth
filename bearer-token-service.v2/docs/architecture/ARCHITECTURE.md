@@ -1,6 +1,6 @@
 # Bearer Token Service V2 - 云厂商级架构设计
 
-> 基于多租户、HMAC 签名认证、Scope 权限控制的企业级架构
+> 基于多租户、QiniuStub 认证的企业级架构
 
 ---
 
@@ -24,8 +24,7 @@
 
 1. **多租户隔离**: 每个客户管理自己的 tokens，数据完全隔离
 2. **安全认证**: 使用 Access Key/Secret Key HMAC 签名认证
-3. **权限控制**: Token 支持细粒度的 scope/权限范围
-4. **可扩展性**: 支持子账户、角色、策略等高级功能
+3. **可扩展性**: 支持子账户、角色、策略等高级功能
 5. **云服务级别**: 对标七牛云、AWS、阿里云的认证架构
 
 ---
@@ -62,7 +61,7 @@
 | **Token 归属** | 无归属 | 关联到租户账户 |
 | **Token 前缀** | `sk-` | `sk-` (可自定义) |
 | **Token 隐藏** | 中间隐藏 30 字符 | 中间隐藏 30 字符 |
-| **权限控制** | 无 | Scope/Permissions/Policy |
+| **权限控制** | 无 | 简化设计 |
 | **租户隔离** | 无 | 严格隔离 (数据库级) |
 | **API 认证** | Basic Auth | HMAC-SHA256 签名 |
 | **子账户** | 不支持 | 支持 (IAM Users) |
@@ -87,19 +86,19 @@
 第二层：租户使用 AK/SK 管理 Bearer Tokens
 ┌──────────────────────────────────────────────────────────┐
 │  租户 A (AK_A/SK_A) ─┐                                    │
-│                      ├─> 创建 Token-A1 (scope: read)     │
-│                      ├─> 创建 Token-A2 (scope: write)    │
+│                      ├─> 创建 Token-A1             │
+│                      ├─> 创建 Token-A2             │
 │                      └─> 列出/禁用/删除自己的 Tokens      │
 ├──────────────────────────────────────────────────────────┤
 │  租户 B (AK_B/SK_B) ─┐                                    │
-│                      ├─> 创建 Token-B1 (scope: admin)    │
+│                      ├─> 创建 Token-B1             │
 │                      └─> 只能看到自己的 Tokens            │
 └──────────────────────────────────────────────────────────┘
 
 第三层：第三方使用 Bearer Token 访问资源
 ┌──────────────────────────────────────────────────────────┐
 │  外部应用/用户 ─> 使用 Token-A1 (Bearer)                  │
-│                └─> 只能执行 Token 允许的操作 (scope)      │
+│                └─> 执行 Token 允许的操作                │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -121,8 +120,6 @@ bearer-token-service.v2/
 ├── auth/                           # 认证模块
 │   ├── hmac.go                     # HMAC 签名认证
 │   └── middleware.go               # 认证中间件
-├── permission/                     # 权限模块
-│   └── scope.go                    # Scope 权限验证
 ├── repository/                     # 数据访问层
 │   ├── mongo_account_repo.go       # Account Repository
 │   ├── mongo_token_repo.go         # Token Repository
@@ -179,7 +176,7 @@ URI="/api/v2/tokens"
 TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 ACCESS_KEY="AK_f8e7d6c5b4a39281"
 SECRET_KEY="SK_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6"
-BODY='{"description":"Token","scope":["storage:read"],"expires_in_seconds":7776000}'  # 90天 = 90*24*3600秒
+BODY='{"description":"Token","expires_in_seconds":7776000}'  # 90天 = 90*24*3600秒
 
 # 构造签名字符串 (只签名 path，不包含 query)
 STRING_TO_SIGN="${METHOD}\n${URI}\n${TIMESTAMP}\n${BODY}"
@@ -221,44 +218,7 @@ func VerifyHMACSignature(r *http.Request, secretKey string) (bool, error) {
 }
 ```
 
-### 2. 权限模块 (permission/)
-
-#### Scope 权限验证算法
-
-```go
-// 权限匹配规则：
-// 1. 精确匹配: "storage:read" == "storage:read"
-// 2. 全局通配: "*" 匹配所有权限
-// 3. 前缀通配: "storage:*" 匹配 "storage:read", "storage:write" 等
-
-支持的 Scope 示例:
-- storage:read         # 存储读权限
-- storage:write        # 存储写权限
-- storage:*            # 存储所有权限
-- cdn:refresh          # CDN 刷新权限
-- cdn:*                # CDN 所有权限
-- *                    # 全部权限
-
-// 权限验证实现
-func HasPermission(tokenScopes []string, requiredScope string) bool {
-    for _, scope := range tokenScopes {
-        if scope == requiredScope || scope == "*" {
-            return true
-        }
-
-        // 支持通配符: storage:* 包含 storage:read
-        if strings.HasSuffix(scope, ":*") {
-            prefix := strings.TrimSuffix(scope, "*")
-            if strings.HasPrefix(requiredScope, prefix) {
-                return true
-            }
-        }
-    }
-    return false
-}
-```
-
-### 3. 租户隔离策略
+### 2. 租户隔离策略
 
 #### 数据隔离
 
@@ -273,7 +233,6 @@ db.Find(bson.M{
 token := &Token{
     AccountID: extractAccountIDFromContext(ctx),
     Token:     generateToken(),
-    Scope:     []string{"storage:read"},
 }
 ```
 
@@ -321,7 +280,6 @@ type Token struct {
     AccountID   string     `bson:"account_id" json:"account_id"`           // 关联到账户
     Token       string     `bson:"token" json:"token"`                     // sk-xxx...
     Description string     `bson:"description" json:"description"`
-    Scope       []string   `bson:"scope" json:"scope"`                     // 权限范围
     RateLimit   *RateLimit `bson:"rate_limit,omitempty" json:"rate_limit,omitempty"`
     CreatedAt   time.Time  `bson:"created_at" json:"created_at"`
     ExpiresAt   time.Time  `bson:"expires_at,omitempty" json:"expires_at,omitempty"`
@@ -405,7 +363,7 @@ Content-Type: application/json
 
 | 端点 | 方法 | 认证 | 功能 |
 |------|------|------|------|
-| `/api/v2/tokens` | POST | HMAC | 创建 Bearer Token（带 Scope）|
+| `/api/v2/tokens` | POST | HMAC | 创建 Bearer Token |
 | `/api/v2/tokens` | GET | HMAC | 列出自己的 Tokens |
 | `/api/v2/tokens/{id}` | GET | HMAC | 获取单个 Token 详情 |
 | `/api/v2/tokens/{id}/status` | PUT | HMAC | 启用/禁用 Token |
@@ -422,10 +380,8 @@ X-Qiniu-Date: 2025-12-25T10:00:00Z
 Content-Type: application/json
 
 {
-  "description": "Production read-only token",
-  "scope": ["storage:read", "cdn:refresh"],
-  "expires_in_seconds": 7776000,  # 90天 = 90*24*3600秒
-  "prefix": "custom_bearer_",
+  "description": "Production token",
+  "expires_in_seconds": 7776000,
   "rate_limit": {
     "requests_per_minute": 1000
   }
@@ -436,10 +392,9 @@ Content-Type: application/json
 ```json
 {
   "token_id": "tk_9z8y7x6w5v4u",
-  "token": "custom_bearer_a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0",
+  "token": "sk-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0",
   "account_id": "acc_1a2b3c4d5e6f",
-  "description": "Production read-only token",
-  "scope": ["storage:read", "cdn:refresh"],
+  "description": "Production token",
   "rate_limit": {
     "requests_per_minute": 1000
   },
@@ -465,9 +420,8 @@ X-Qiniu-Date: 2025-12-25T10:00:00Z
   "tokens": [
     {
       "token_id": "tk_9z8y7x6w5v4u",
-      "token_preview": "sk-a1b2c3d4e5f6******************************v2w3x4y5z6",
-      "description": "Production read-only token",
-      "scope": ["storage:read", "cdn:refresh"],
+      "token_preview": "sk-a1b2c3d4****e5f6g7h8",
+      "description": "Production token",
       "created_at": "2025-12-25T10:00:00Z",
       "expires_at": "2026-03-25T10:00:00Z",
       "is_active": true,
@@ -487,19 +441,15 @@ X-Qiniu-Date: 2025-12-25T10:00:00Z
 
 | 端点 | 方法 | 认证 | 功能 |
 |------|------|------|------|
-| `/api/v2/validate` | POST | Bearer Token | 验证 Token + 权限检查 |
+| `/api/v2/validate` | POST | Bearer Token | 验证 Token |
 
-#### 验证 Bearer Token（带权限检查）
+#### 验证 Bearer Token
 
 **请求:**
 ```http
 POST /api/v2/validate
 Authorization: Bearer sk-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
 Content-Type: application/json
-
-{
-  "required_scope": "storage:read"
-}
 ```
 
 **响应:**
@@ -510,13 +460,8 @@ Content-Type: application/json
   "token_info": {
     "token_id": "tk_9z8y7x6w5v4u",
     "account_id": "acc_1a2b3c4d5e6f",
-    "scope": ["storage:read", "cdn:refresh"],
     "is_active": true,
     "expires_at": "2026-03-25T10:00:00Z"
-  },
-  "permission_check": {
-    "requested": "storage:read",
-    "granted": true
   }
 }
 ```
@@ -526,8 +471,6 @@ Content-Type: application/json
 1. Token 存在
 2. Token.is_active == true
 3. Token.expires_at > now()
-4. 如果请求了特定 scope:
-   └─> 检查 Token.scope 是否包含请求的权限
 ```
 
 ---
@@ -633,7 +576,6 @@ curl -X POST http://upload.qiniup.com \
 **对比:**
 - ✅ 本方案使用 HMAC-SHA256（比七牛的 SHA1 更安全）
 - ✅ 本方案支持时间戳验证（防重放攻击）
-- ✅ 本方案支持 Scope 权限控制
 
 ### AWS (Amazon Web Services)
 
@@ -677,10 +619,6 @@ ErrTimestampExpired     = 4002  // 时间戳过期
 ErrAccessKeyNotFound    = 4003  // AccessKey 不存在
 ErrAccountSuspended     = 4004  // 账户已暂停
 
-// 权限错误 (4031-4099)
-ErrPermissionDenied     = 4031  // 权限不足
-ErrScopeNotGranted      = 4032  // Scope 未授权
-
 // Token 错误 (4041-4099)
 ErrTokenNotFound        = 4041  // Token 不存在
 ErrTokenExpired         = 4042  // Token 已过期
@@ -688,7 +626,6 @@ ErrTokenInactive        = 4043  // Token 已禁用
 
 // 业务错误 (5001-5099)
 ErrDuplicateEmail       = 5001  // 邮箱已存在
-ErrInvalidScope         = 5002  // 无效的 Scope 格式
 ```
 
 ---
@@ -753,9 +690,7 @@ cache.Set("account:"+accessKey, account, 10*time.Minute)
 - ✅ 数据模型定义（Account, Token, AuditLog）
 - ✅ HMAC 签名认证（auth/hmac.go）
 - ✅ 租户隔离的 Token 管理
-- ✅ Scope 权限验证（permission/scope.go）
 - ✅ Bearer Token 验证 API
-- ✅ 自定义 Token 前缀支持
 - ✅ 与 V1 格式兼容（token 前缀 `sk-`，中间隐藏）
 
 ### Phase 2: 增强功能
@@ -790,7 +725,6 @@ router.HandleFunc("/api/v2/tokens", v2Handler.CreateToken)
 // 数据迁移脚本
 // 1. 创建默认 Account
 // 2. 将所有 V1 Tokens 关联到默认 Account
-// 3. 为 V1 Tokens 添加默认 Scope: ["*"]
 ```
 
 ### 向后兼容保证
@@ -810,10 +744,9 @@ router.HandleFunc("/api/v2/tokens", v2Handler.CreateToken)
 
 1. **企业级多租户**: 完全的租户隔离，支持 SaaS 化部署
 2. **云厂商级认证**: HMAC-SHA256 签名，对标七牛云、AWS、阿里云
-3. **细粒度权限**: Scope 权限控制，支持通配符
-4. **高安全性**: 签名防篡改、时间戳防重放、常量时间比较
-5. **高可扩展**: 模块化设计，支持子账户、策略、审计等扩展
-6. **生产就绪**: 完整的错误处理、审计日志、性能优化
+3. **高安全性**: 签名防篡改、时间戳防重放、常量时间比较
+4. **高可扩展**: 模块化设计，支持子账户、策略、审计等扩展
+5. **生产就绪**: 完整的错误处理、审计日志、性能优化
 
 ### 下一步计划
 
