@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -52,7 +53,8 @@ func (h *ValidationHandlerImpl) ValidateToken(w http.ResponseWriter, r *http.Req
 	}
 
 	// 4. 记录使用（异步，不影响响应）
-	go h.validationService.RecordTokenUsage(r.Context(), tokenValue)
+	// 使用 context.Background() 因为 r.Context() 会在响应后取消
+	go h.validationService.RecordTokenUsage(context.Background(), tokenValue)
 
 	// 5. 返回成功响应
 	respondJSON(w, http.StatusOK, resp)
