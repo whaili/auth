@@ -20,6 +20,8 @@ Bearer Token Service V2 支持通过环境变量进行灵活配置，方便在�
 | `REDIS_PASSWORD` | Redis 密码 | 字符串 | 空 | 否 |
 | `REDIS_DB` | Redis 数据库编号 | `0-15` | `0` | 否 |
 | `CACHE_TOKEN_TTL` | Token 缓存过期时间 | Duration (如 `5m`) | `5m` | 否 |
+| `LOG_LEVEL` | 日志级别 | `debug` / `info` / `warn` / `error` | `info` | 否 |
+| `LOG_FORMAT` | 日志格式 | `json` / `text` | `text` | 否 |
 
 ---
 
@@ -467,6 +469,84 @@ export QINIU_UID_AUTO_CREATE=true  # 或 false
 ```
 3. 重启服务
 4. 验证现有 UID 能正确映射
+
+---
+
+---
+
+## 📊 可观测性配置
+
+### 日志配置
+
+```bash
+# 日志级别: debug, info, warn, error
+export LOG_LEVEL=info
+
+# 日志格式: json, text
+# - json: 生产环境推荐，便于 ELK/Loki 采集
+# - text: 开发环境推荐，便于阅读
+export LOG_FORMAT=text
+```
+
+**日志特性**：
+- 使用 Go 1.21+ 标准库 `slog`
+- 自动注入 `request_id`, `account_id`, `token_id` 到日志上下文
+- 结构化 JSON 格式便于日志分析
+
+### Prometheus 指标
+
+服务自动暴露 `/metrics` 端点，包含以下指标：
+
+| 指标名称 | 类型 | 标签 | 描述 |
+|---------|------|------|------|
+| `http_requests_total` | Counter | method, endpoint, status_code | HTTP 请求总数 |
+| `http_request_duration_seconds` | Histogram | method, endpoint | 请求延迟分布 |
+| `http_requests_in_flight` | Gauge | - | 当前在途请求数 |
+| `token_validations_total` | Counter | result | Token 验证次数 |
+| `token_validation_duration_seconds` | Histogram | - | Token 验证延迟 |
+| `rate_limit_hits_total` | Counter | level | 限流拒绝次数 |
+| `cache_operations_total` | Counter | operation, result | 缓存操作次数 |
+| `cache_operation_duration_seconds` | Histogram | operation | 缓存操作延迟 |
+
+**验证指标**:
+```bash
+curl http://localhost:8080/metrics | grep -E "^(http_|token_|rate_limit_|cache_)"
+```
+
+### Request ID 追踪
+
+- 自动生成格式: `req_` + 24位十六进制
+- 响应头: `X-Request-ID`
+- 支持从请求头 `X-Request-ID` 透传
+
+**示例**:
+```bash
+curl -i http://localhost:8080/health
+# 响应头: X-Request-ID: req_a1b2c3d4e5f6g7h8i9j0k1l2
+```
+
+### 监控栈部署
+
+项目提供完整的 Prometheus + Grafana 监控栈：
+
+```bash
+cd _cust/deployment/monitoring
+
+# 本地测试（简化版）
+docker-compose -f docker-compose.local.yml up -d
+
+# 生产环境（完整版）
+docker-compose -f docker-compose.monitoring.yml up -d
+```
+
+**访问地址**:
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000 (admin/admin)
+- AlertManager: http://localhost:9093
+
+**预置 Dashboard**:
+- Bearer Token Service - 服务概览
+- 包含: QPS、延迟、错误率、缓存命中率等面板
 
 ---
 
