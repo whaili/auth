@@ -60,6 +60,15 @@ bash tests/test_qstub_api.sh
 ### 5. 权限系统
 - ✅ 获取权限列表
 
+### 6. Redis 缓存
+- ✅ Token 创建后不写入缓存
+- ✅ 首次验证写入缓存
+- ✅ 缓存命中加速响应
+- ✅ Token 禁用后缓存失效
+- ✅ Token 删除后缓存失效
+- ✅ 空对象缓存防穿透
+- ✅ 缓存 TTL 验证
+
 ---
 
 ## 🔧 测试脚本说明
@@ -86,6 +95,41 @@ QINIU_IUID=8901234              # 测试用 IUID
 8. 更新 Token 状态
 9. 获取权限列表
 10. 删除 Tokens
+
+### test_redis_cache.sh
+
+Redis 缓存功能测试脚本。
+
+**前置条件**：
+- 服务启动时需设置 `REDIS_ENABLED=true`
+- Redis 容器运行中（`bearer-token-redis`）
+
+**环境变量**：
+```bash
+BASE_URL=http://localhost:8081  # 服务地址
+REDIS_HOST=localhost            # Redis 地址
+REDIS_PORT=6379                 # Redis 端口
+```
+
+**测试流程**：
+1. 前置检查（服务、Redis 可用性）
+2. 创建 Token（验证不写入缓存）
+3. 首次验证（验证写入缓存）
+4. 缓存命中性能测试
+5. 禁用 Token（验证缓存失效）
+6. 重新启用 Token（验证缓存更新）
+7. 删除 Token（验证缓存失效）
+8. 空对象缓存测试（防穿透）
+9. 缓存 TTL 测试
+
+**运行方式**：
+```bash
+# 确保服务启用 Redis 缓存
+REDIS_ENABLED=true PORT=8081 ./bin/server &
+
+# 运行缓存测试
+BASE_URL=http://localhost:8081 bash tests/test_redis_cache.sh
+```
 
 ---
 
@@ -259,4 +303,4 @@ test_<功能名称>
 
 ---
 
-**最后更新**: 2026-01-12
+**最后更新**: 2026-01-14

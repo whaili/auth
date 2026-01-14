@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"bearer-token-service.v1/v2/auth"
+	"bearer-token-service.v1/v2/cache"
 	"bearer-token-service.v1/v2/config"
 	"bearer-token-service.v1/v2/handlers"
 	"bearer-token-service.v1/v2/ratelimit"
@@ -92,7 +93,44 @@ func main() {
 	}
 
 	// ========================================
-	// 3. 初始化 Service 层
+	// 3. 初始化 Redis 和缓存层（可选）
+	// ========================================
+	redisConfig := cache.LoadRedisConfig()
+
+	if redisConfig.Enabled {
+		log.Println("📦 Initializing Redis cache...")
+
+		// 创建 Redis 客户端
+		redisClient, err := cache.NewRedisClient(
+			redisConfig.Addr,
+			redisConfig.Password,
+			redisConfig.DB,
+			redisConfig.PoolSize,
+			redisConfig.MinIdleConns,
+			redisConfig.MaxRetries,
+		)
+		if err != nil {
+			log.Fatalf("❌ Failed to connect to Redis: %v", err)
+		}
+		defer redisClient.Close()
+
+		log.Printf("✅ Connected to Redis at %s", redisConfig.Addr)
+
+		// 初始化 Token 缓存
+		tokenCache := cache.NewTokenCache(redisClient, tokenRepo, redisConfig.TokenCacheTTL)
+
+		// 注入缓存到 Repository
+		tokenRepo.SetCache(tokenCache)
+
+		log.Println("✅ Redis cache enabled (Token only)")
+		log.Printf("   - Token cache TTL: %v", redisConfig.TokenCacheTTL)
+	} else {
+		log.Println("ℹ️  Redis cache disabled (using MongoDB directly)")
+		log.Println("   Set REDIS_ENABLED=true to enable Redis caching")
+	}
+
+	// ========================================
+	// 4. 初始化 Service 层
 	// ========================================
 	tokenService := service.NewTokenService(tokenRepo, auditRepo)
 	validationService := service.NewValidationService(tokenRepo)
@@ -101,7 +139,7 @@ func main() {
 	log.Println("✅ Services initialized")
 
 	// ========================================
-	// 4. 初始化 Handler 层
+	// 5. 初始化 Handler 层
 	// ========================================
 	tokenHandler := handlers.NewTokenHandler(tokenService)
 	validationHandler := handlers.NewValidationHandler(validationService)
@@ -109,7 +147,7 @@ func main() {
 	log.Println("✅ Handlers initialized")
 
 	// ========================================
-	// 5. 创建 QiniuStub 认证中间件
+	// 6. 创建 QiniuStub 认证中间件
 	// ========================================
 	// 配置七牛 UID 映射器
 	var qiniuUIDMapper auth.QiniuUIDMapper
@@ -131,7 +169,7 @@ func main() {
 	log.Println("✅ QiniuStub authentication middleware initialized")
 
 	// ========================================
-	// 6. 初始化限流中间件（可选）
+	// 7. 初始化限流中间件（可选）
 	// ========================================
 	rateLimitConfig := config.LoadRateLimitConfig()
 
@@ -172,7 +210,7 @@ func main() {
 	}
 
 	// ========================================
-	// 7. 设置路由
+	// 8. 设置路由
 	// ========================================
 	router := mux.NewRouter()
 
@@ -212,7 +250,7 @@ func main() {
 	log.Println("✅ Routes configured")
 
 	// ========================================
-	// 8. 启动服务器
+	// 9. 启动服务器
 	// ========================================
 	port := os.Getenv("PORT")
 	if port == "" {

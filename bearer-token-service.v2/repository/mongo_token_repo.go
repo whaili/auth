@@ -17,9 +17,18 @@ const (
 	tokensCollection = "tokens"
 )
 
+// TokenCache Token 缓存接口（避免循环依赖）
+type TokenCache interface {
+	GetByTokenValue(ctx context.Context, tokenValue string) (*interfaces.Token, error)
+	GetByID(ctx context.Context, tokenID string) (*interfaces.Token, error)
+	InvalidateByTokenValue(ctx context.Context, tokenValue string) error
+	InvalidateByID(ctx context.Context, tokenID string) error
+}
+
 // MongoTokenRepository MongoDB 实现的 Token 存储库（带租户隔离）
 type MongoTokenRepository struct {
 	collection *mongo.Collection
+	cache      TokenCache // 可选的缓存层
 }
 
 // NewMongoTokenRepository 创建 Token 存储库实例
@@ -27,6 +36,37 @@ func NewMongoTokenRepository(db *mongo.Database) *MongoTokenRepository {
 	return &MongoTokenRepository{
 		collection: db.Collection(tokensCollection),
 	}
+}
+
+// SetCache 设置缓存层（依赖注入）
+func (r *MongoTokenRepository) SetCache(cache TokenCache) {
+	r.cache = cache
+}
+
+// GetByTokenValueDirect 直接从 MongoDB 查询（不经过缓存，供缓存层回调使用）
+func (r *MongoTokenRepository) GetByTokenValueDirect(ctx context.Context, tokenValue string) (*interfaces.Token, error) {
+	var token interfaces.Token
+	err := r.collection.FindOne(ctx, bson.M{"token": tokenValue}).Decode(&token)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &token, nil
+}
+
+// GetByIDDirect 直接从 MongoDB 查询（不经过缓存，供缓存层回调使用）
+func (r *MongoTokenRepository) GetByIDDirect(ctx context.Context, tokenID string) (*interfaces.Token, error) {
+	var token interfaces.Token
+	err := r.collection.FindOne(ctx, bson.M{"_id": tokenID}).Decode(&token)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &token, nil
 }
 
 // Create 创建新 Token
@@ -64,6 +104,12 @@ func (r *MongoTokenRepository) Create(ctx context.Context, token *interfaces.Tok
 
 // GetByID 根据 ID 查询 Token
 func (r *MongoTokenRepository) GetByID(ctx context.Context, tokenID string) (*interfaces.Token, error) {
+	// 如果配置了缓存，优先从缓存读取
+	if r.cache != nil {
+		return r.cache.GetByID(ctx, tokenID)
+	}
+
+	// 降级到 MongoDB 直查
 	var token interfaces.Token
 	err := r.collection.FindOne(ctx, bson.M{"_id": tokenID}).Decode(&token)
 	if err != nil {
@@ -77,6 +123,12 @@ func (r *MongoTokenRepository) GetByID(ctx context.Context, tokenID string) (*in
 
 // GetByTokenValue 根据 token 值查询 Token
 func (r *MongoTokenRepository) GetByTokenValue(ctx context.Context, tokenValue string) (*interfaces.Token, error) {
+	// 如果配置了缓存，优先从缓存读取
+	if r.cache != nil {
+		return r.cache.GetByTokenValue(ctx, tokenValue)
+	}
+
+	// 降级到 MongoDB 直查
 	var token interfaces.Token
 	err := r.collection.FindOne(ctx, bson.M{"token": tokenValue}).Decode(&token)
 	if err != nil {
@@ -140,6 +192,17 @@ func (r *MongoTokenRepository) CountByAccountID(ctx context.Context, accountID s
 
 // UpdateStatus 更新 Token 状态
 func (r *MongoTokenRepository) UpdateStatus(ctx context.Context, tokenID string, isActive bool) error {
+	// 先查询获取 token_value（用于失效缓存）
+	var token interfaces.Token
+	err := r.collection.FindOne(ctx, bson.M{"_id": tokenID}).Decode(&token)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return errors.New("token not found")
+		}
+		return err
+	}
+
+	// 更新状态
 	result, err := r.collection.UpdateOne(
 		ctx,
 		bson.M{"_id": tokenID},
@@ -158,11 +221,28 @@ func (r *MongoTokenRepository) UpdateStatus(ctx context.Context, tokenID string,
 		return errors.New("token not found")
 	}
 
+	// 失效两个缓存键（token:id 和 token:val）
+	if r.cache != nil {
+		_ = r.cache.InvalidateByID(ctx, tokenID)
+		_ = r.cache.InvalidateByTokenValue(ctx, token.Token)
+	}
+
 	return nil
 }
 
 // Delete 删除 Token
 func (r *MongoTokenRepository) Delete(ctx context.Context, tokenID string) error {
+	// 先查询获取 token_value（用于失效缓存）
+	var token interfaces.Token
+	err := r.collection.FindOne(ctx, bson.M{"_id": tokenID}).Decode(&token)
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return errors.New("token not found")
+		}
+		return err
+	}
+
+	// 删除 MongoDB
 	result, err := r.collection.DeleteOne(ctx, bson.M{"_id": tokenID})
 	if err != nil {
 		return err
@@ -170,6 +250,12 @@ func (r *MongoTokenRepository) Delete(ctx context.Context, tokenID string) error
 
 	if result.DeletedCount == 0 {
 		return errors.New("token not found")
+	}
+
+	// 失效两个缓存键
+	if r.cache != nil {
+		_ = r.cache.InvalidateByID(ctx, tokenID)
+		_ = r.cache.InvalidateByTokenValue(ctx, token.Token)
 	}
 
 	return nil
