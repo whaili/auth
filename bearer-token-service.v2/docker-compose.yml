@@ -7,6 +7,26 @@ version: '3.8'
 
 services:
   # ========================================
+  # Redis 缓存
+  # ========================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: bearer-token-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    networks:
+      - bearer-token-net
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ========================================
   # MongoDB 数据库
   # ========================================
   mongodb:
@@ -46,6 +66,8 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       # 基础配置
       PORT: ${PORT:-8080}
@@ -62,6 +84,13 @@ services:
 
       # HMAC 配置
       HMAC_TIMESTAMP_TOLERANCE: ${HMAC_TIMESTAMP_TOLERANCE:-15m}
+
+      # Redis 缓存配置
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: 0
+      CACHE_TOKEN_TTL: 5m
     volumes:
       # 日志持久化
       - ./logs:/app/logs
@@ -124,4 +153,6 @@ volumes:
   mongodb_data:
     driver: local
   mongodb_config:
+    driver: local
+  redis_data:
     driver: local

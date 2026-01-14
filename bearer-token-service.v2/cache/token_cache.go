@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"bearer-token-service.v1/v2/interfaces"
+	"bearer-token-service.v1/v2/observability"
 )
 
 // TokenCache Token 缓存接口
@@ -43,11 +44,15 @@ func NewTokenCache(redis RedisClient, fetcher DirectTokenFetcher, baseTTL time.D
 // GetByTokenValue 通过 TokenValue 获取 Token（含缓存）
 func (c *TokenCacheImpl) GetByTokenValue(ctx context.Context, tokenValue string) (*interfaces.Token, error) {
 	cacheKey := fmt.Sprintf("token:val:%s", tokenValue)
+	start := time.Now()
 
 	// 1. 尝试从 Redis 读取
 	cached, err := c.redis.Get(ctx, cacheKey)
 	if err == nil {
 		// 缓存命中
+		observability.CacheOperationsTotal.WithLabelValues("get", "hit").Inc()
+		observability.CacheOperationDuration.WithLabelValues("get").Observe(time.Since(start).Seconds())
+
 		if cached == "null" {
 			// 空对象缓存（防穿透）
 			return nil, nil
@@ -57,11 +62,15 @@ func (c *TokenCacheImpl) GetByTokenValue(ctx context.Context, tokenValue string)
 		if err := json.Unmarshal([]byte(cached), &token); err == nil {
 			return &token, nil
 		}
+	} else {
+		// 缓存未命中
+		observability.CacheOperationsTotal.WithLabelValues("get", "miss").Inc()
 	}
 
 	// 2. Redis 未命中或出错，降级到 MongoDB（使用 Direct 方法避免循环调用）
 	token, err := c.fetcher.GetByTokenValueDirect(ctx, tokenValue)
 	if err != nil {
+		observability.CacheOperationsTotal.WithLabelValues("get", "error").Inc()
 		return nil, err
 	}
 
@@ -74,10 +83,15 @@ func (c *TokenCacheImpl) GetByTokenValue(ctx context.Context, tokenValue string)
 // GetByID 通过 ID 获取 Token（含缓存）
 func (c *TokenCacheImpl) GetByID(ctx context.Context, tokenID string) (*interfaces.Token, error) {
 	cacheKey := fmt.Sprintf("token:id:%s", tokenID)
+	start := time.Now()
 
 	// 1. 尝试从 Redis 读取
 	cached, err := c.redis.Get(ctx, cacheKey)
 	if err == nil {
+		// 缓存命中
+		observability.CacheOperationsTotal.WithLabelValues("get", "hit").Inc()
+		observability.CacheOperationDuration.WithLabelValues("get").Observe(time.Since(start).Seconds())
+
 		if cached == "null" {
 			return nil, nil
 		}
@@ -86,11 +100,15 @@ func (c *TokenCacheImpl) GetByID(ctx context.Context, tokenID string) (*interfac
 		if err := json.Unmarshal([]byte(cached), &token); err == nil {
 			return &token, nil
 		}
+	} else {
+		// 缓存未命中
+		observability.CacheOperationsTotal.WithLabelValues("get", "miss").Inc()
 	}
 
 	// 2. Redis 未命中或出错，降级到 MongoDB（使用 Direct 方法避免循环调用）
 	token, err := c.fetcher.GetByIDDirect(ctx, tokenID)
 	if err != nil {
+		observability.CacheOperationsTotal.WithLabelValues("get", "error").Inc()
 		return nil, err
 	}
 
@@ -112,9 +130,17 @@ func (c *TokenCacheImpl) InvalidateByID(ctx context.Context, tokenID string) err
 
 // cacheToken 写入缓存（带 TTL 抖动 + 空对象缓存）
 func (c *TokenCacheImpl) cacheToken(ctx context.Context, cacheKey string, token *interfaces.Token) {
+	start := time.Now()
+
 	if token == nil {
 		// 缓存空对象（防穿透），TTL: 1分钟
-		_ = c.redis.Set(ctx, cacheKey, "null", 1*time.Minute)
+		err := c.redis.Set(ctx, cacheKey, "null", 1*time.Minute)
+		if err != nil {
+			observability.CacheOperationsTotal.WithLabelValues("set", "error").Inc()
+		} else {
+			observability.CacheOperationsTotal.WithLabelValues("set", "success").Inc()
+			observability.CacheOperationDuration.WithLabelValues("set").Observe(time.Since(start).Seconds())
+		}
 		return
 	}
 
@@ -128,5 +154,11 @@ func (c *TokenCacheImpl) cacheToken(ctx context.Context, cacheKey string, token 
 	jitter := time.Duration(rand.Intn(int(c.baseTTL.Seconds() / 10)))
 	ttl := c.baseTTL + jitter*time.Second
 
-	_ = c.redis.Set(ctx, cacheKey, data, ttl)
+	err = c.redis.Set(ctx, cacheKey, data, ttl)
+	if err != nil {
+		observability.CacheOperationsTotal.WithLabelValues("set", "error").Inc()
+	} else {
+		observability.CacheOperationsTotal.WithLabelValues("set", "success").Inc()
+		observability.CacheOperationDuration.WithLabelValues("set").Observe(time.Since(start).Seconds())
+	}
 }

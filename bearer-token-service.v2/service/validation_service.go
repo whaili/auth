@@ -3,11 +3,13 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
 	"bearer-token-service.v1/v2/interfaces"
+	"bearer-token-service.v1/v2/observability"
 )
 
 // ValidationServiceImpl Token 验证服务实现
@@ -24,9 +26,18 @@ func NewValidationService(tokenRepo interfaces.TokenRepository) *ValidationServi
 
 // ValidateToken 验证 Token
 func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfaces.TokenValidateRequest) (*interfaces.TokenValidateResponse, error) {
+	start := time.Now()
+
 	// 1. 查询 Token
 	token, err := s.tokenRepo.GetByTokenValue(ctx, req.Token)
+
+	// 记录验证耗时
+	duration := time.Since(start)
+	observability.TokenValidationDuration.Observe(duration.Seconds())
+
 	if err != nil {
+		observability.TokenValidationsTotal.WithLabelValues("error").Inc()
+		observability.LogError(ctx, "Token validation failed", err)
 		return &interfaces.TokenValidateResponse{
 			Valid:   false,
 			Message: "internal error",
@@ -34,6 +45,8 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 	}
 
 	if token == nil {
+		observability.TokenValidationsTotal.WithLabelValues("not_found").Inc()
+		observability.LogInfo(ctx, "Token not found")
 		return &interfaces.TokenValidateResponse{
 			Valid:   false,
 			Message: "Token not found",
@@ -42,6 +55,8 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 
 	// 2. 检查 Token 是否激活
 	if !token.IsActive {
+		observability.TokenValidationsTotal.WithLabelValues("inactive").Inc()
+		observability.LogInfo(ctx, "Token is inactive", slog.String("token_id", token.ID))
 		return &interfaces.TokenValidateResponse{
 			Valid:   false,
 			Message: "Token is inactive",
@@ -50,6 +65,10 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 
 	// 3. 检查 Token 是否过期
 	if token.ExpiresAt != nil && token.ExpiresAt.Before(time.Now()) {
+		observability.TokenValidationsTotal.WithLabelValues("expired").Inc()
+		observability.LogInfo(ctx, "Token has expired",
+			slog.String("token_id", token.ID),
+			slog.Time("expired_at", *token.ExpiresAt))
 		return &interfaces.TokenValidateResponse{
 			Valid:   false,
 			Message: "Token has expired",
@@ -57,6 +76,12 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 	}
 
 	// 4. 验证通过，返回 Token 信息
+	observability.TokenValidationsTotal.WithLabelValues("valid").Inc()
+	observability.LogDebug(ctx, "Token validation succeeded",
+		slog.String("token_id", token.ID),
+		slog.String("account_id", token.AccountID),
+		slog.Float64("duration_ms", float64(duration.Microseconds())/1000))
+
 	tokenInfo := &interfaces.TokenInfo{
 		TokenID:  token.ID,
 		IsActive: token.IsActive,

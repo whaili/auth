@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -12,16 +12,31 @@ import (
 	"bearer-token-service.v1/v2/cache"
 	"bearer-token-service.v1/v2/config"
 	"bearer-token-service.v1/v2/handlers"
+	"bearer-token-service.v1/v2/observability"
 	"bearer-token-service.v1/v2/ratelimit"
 	"bearer-token-service.v1/v2/repository"
 	"bearer-token-service.v1/v2/service"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func main() {
-	log.Println("🚀 Bearer Token Service V2 - Starting...")
+	// ========================================
+	// 0. 初始化日志系统
+	// ========================================
+	logLevel := os.Getenv("LOG_LEVEL")
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	logFormat := os.Getenv("LOG_FORMAT")
+	if logFormat == "" {
+		logFormat = "text"
+	}
+	observability.InitLogger(logLevel, logFormat, nil)
+
+	slog.Info("Bearer Token Service V2 starting...")
 
 	// ========================================
 	// 1. MongoDB 连接
@@ -36,15 +51,17 @@ func main() {
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
-		log.Fatalf("❌ Failed to connect to MongoDB: %v", err)
+		slog.Error("Failed to connect to MongoDB", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 	defer client.Disconnect(ctx)
 
 	// 验证连接
 	if err := client.Ping(ctx, nil); err != nil {
-		log.Fatalf("❌ MongoDB ping failed: %v", err)
+		slog.Error("MongoDB ping failed", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
-	log.Println("✅ Connected to MongoDB")
+	slog.Info("Connected to MongoDB")
 
 	// 数据库名称（优先级：环境变量 > URI 中的数据库名 > 默认值）
 	dbName := os.Getenv("MONGO_DATABASE")
@@ -56,12 +73,12 @@ func main() {
 		// 如果还是没有，使用默认值
 		if dbName == "" {
 			dbName = "token_service_v2"
-			log.Printf("⚠️  Warning: No database name specified in MONGO_URI or MONGO_DATABASE, using default: %s", dbName)
+			slog.Warn("No database name specified, using default", slog.String("database", dbName))
 		} else {
-			log.Printf("ℹ️  Using database from MONGO_URI: %s", dbName)
+			slog.Info("Using database from MONGO_URI", slog.String("database", dbName))
 		}
 	} else {
-		log.Printf("ℹ️  Using database from MONGO_DATABASE env: %s", dbName)
+		slog.Info("Using database from MONGO_DATABASE env", slog.String("database", dbName))
 	}
 	db := client.Database(dbName)
 
@@ -76,20 +93,19 @@ func main() {
 	skipIndexCreation := os.Getenv("SKIP_INDEX_CREATION") == "true"
 
 	if skipIndexCreation {
-		log.Println("⏭️  Skipping index creation (SKIP_INDEX_CREATION=true)")
-		log.Println("ℹ️  Ensure indexes are created by running: scripts/init/init-db.sh")
+		slog.Info("Skipping index creation (SKIP_INDEX_CREATION=true)")
 	} else {
-		log.Println("📊 Creating database indexes...")
+		slog.Info("Creating database indexes...")
 		if err := accountRepo.CreateIndexes(context.Background()); err != nil {
-			log.Printf("⚠️  Warning: Failed to create account indexes: %v", err)
+			slog.Warn("Failed to create account indexes", slog.String("error", err.Error()))
 		}
 		if err := tokenRepo.CreateIndexes(context.Background()); err != nil {
-			log.Printf("⚠️  Warning: Failed to create token indexes: %v", err)
+			slog.Warn("Failed to create token indexes", slog.String("error", err.Error()))
 		}
 		if err := auditRepo.CreateIndexes(context.Background()); err != nil {
-			log.Printf("⚠️  Warning: Failed to create audit log indexes: %v", err)
+			slog.Warn("Failed to create audit log indexes", slog.String("error", err.Error()))
 		}
-		log.Println("✅ Database indexes created")
+		slog.Info("Database indexes created")
 	}
 
 	// ========================================
@@ -98,7 +114,7 @@ func main() {
 	redisConfig := cache.LoadRedisConfig()
 
 	if redisConfig.Enabled {
-		log.Println("📦 Initializing Redis cache...")
+		slog.Info("Initializing Redis cache...")
 
 		// 创建 Redis 客户端
 		redisClient, err := cache.NewRedisClient(
@@ -110,11 +126,12 @@ func main() {
 			redisConfig.MaxRetries,
 		)
 		if err != nil {
-			log.Fatalf("❌ Failed to connect to Redis: %v", err)
+			slog.Error("Failed to connect to Redis", slog.String("error", err.Error()))
+			os.Exit(1)
 		}
 		defer redisClient.Close()
 
-		log.Printf("✅ Connected to Redis at %s", redisConfig.Addr)
+		slog.Info("Connected to Redis", slog.String("addr", redisConfig.Addr))
 
 		// 初始化 Token 缓存
 		tokenCache := cache.NewTokenCache(redisClient, tokenRepo, redisConfig.TokenCacheTTL)
@@ -122,11 +139,9 @@ func main() {
 		// 注入缓存到 Repository
 		tokenRepo.SetCache(tokenCache)
 
-		log.Println("✅ Redis cache enabled (Token only)")
-		log.Printf("   - Token cache TTL: %v", redisConfig.TokenCacheTTL)
+		slog.Info("Redis cache enabled", slog.Duration("token_cache_ttl", redisConfig.TokenCacheTTL))
 	} else {
-		log.Println("ℹ️  Redis cache disabled (using MongoDB directly)")
-		log.Println("   Set REDIS_ENABLED=true to enable Redis caching")
+		slog.Info("Redis cache disabled (set REDIS_ENABLED=true to enable)")
 	}
 
 	// ========================================
@@ -136,7 +151,7 @@ func main() {
 	validationService := service.NewValidationService(tokenRepo)
 	_ = service.NewAuditService(auditRepo) // 预留用于未来的审计日志查询
 
-	log.Println("✅ Services initialized")
+	slog.Info("Services initialized")
 
 	// ========================================
 	// 5. 初始化 Handler 层
@@ -144,7 +159,7 @@ func main() {
 	tokenHandler := handlers.NewTokenHandler(tokenService)
 	validationHandler := handlers.NewValidationHandler(validationService)
 
-	log.Println("✅ Handlers initialized")
+	slog.Info("Handlers initialized")
 
 	// ========================================
 	// 6. 创建 QiniuStub 认证中间件
@@ -157,16 +172,16 @@ func main() {
 		// 数据库模式（查询或创建映射关系）
 		autoCreate := os.Getenv("QINIU_UID_AUTO_CREATE") == "true"
 		qiniuUIDMapper = auth.NewDatabaseQiniuUIDMapper(accountRepo, autoCreate)
-		log.Printf("✅ Using DatabaseQiniuUIDMapper (autoCreate=%v)", autoCreate)
+		slog.Info("Using DatabaseQiniuUIDMapper", slog.Bool("auto_create", autoCreate))
 	} else {
 		// 简单模式（默认）：直接转换为 qiniu_{uid}
 		qiniuUIDMapper = auth.NewSimpleQiniuUIDMapper()
-		log.Println("✅ Using SimpleQiniuUIDMapper (format: qiniu_{uid})")
+		slog.Info("Using SimpleQiniuUIDMapper (format: qiniu_{uid})")
 	}
 
 	// 创建 QiniuStub 认证中间件
 	qstubMiddleware := auth.NewQstubAuthMiddleware(qiniuUIDMapper)
-	log.Println("✅ QiniuStub authentication middleware initialized")
+	slog.Info("QiniuStub authentication middleware initialized")
 
 	// ========================================
 	// 7. 初始化限流中间件（可选）
@@ -189,30 +204,34 @@ func main() {
 
 	// 打印限流配置状态
 	if rateLimitConfig.EnableAppLimit {
-		log.Printf("✅ Application rate limit ENABLED: %d req/min, %d req/hour, %d req/day",
-			rateLimitConfig.AppLimitPerMinute,
-			rateLimitConfig.AppLimitPerHour,
-			rateLimitConfig.AppLimitPerDay)
+		slog.Info("Application rate limit enabled",
+			slog.Int("per_minute", rateLimitConfig.AppLimitPerMinute),
+			slog.Int("per_hour", rateLimitConfig.AppLimitPerHour),
+			slog.Int("per_day", rateLimitConfig.AppLimitPerDay))
 	} else {
-		log.Println("ℹ️  Application rate limit DISABLED (set ENABLE_APP_RATE_LIMIT=true to enable)")
+		slog.Info("Application rate limit disabled (set ENABLE_APP_RATE_LIMIT=true to enable)")
 	}
 
 	if rateLimitConfig.EnableAccountLimit {
-		log.Println("✅ Account rate limit ENABLED (configured per account)")
+		slog.Info("Account rate limit enabled")
 	} else {
-		log.Println("ℹ️  Account rate limit DISABLED (set ENABLE_ACCOUNT_RATE_LIMIT=true to enable)")
+		slog.Info("Account rate limit disabled (set ENABLE_ACCOUNT_RATE_LIMIT=true to enable)")
 	}
 
 	if rateLimitConfig.EnableTokenLimit {
-		log.Println("✅ Token rate limit ENABLED (configured per token)")
+		slog.Info("Token rate limit enabled")
 	} else {
-		log.Println("ℹ️  Token rate limit DISABLED (set ENABLE_TOKEN_RATE_LIMIT=true to enable)")
+		slog.Info("Token rate limit disabled (set ENABLE_TOKEN_RATE_LIMIT=true to enable)")
 	}
 
 	// ========================================
 	// 8. 设置路由
 	// ========================================
 	router := mux.NewRouter()
+
+	// 可观测性中间件（最外层）
+	router.Use(observability.RequestTrackingMiddleware)
+	router.Use(observability.MetricsMiddleware)
 
 	// 应用全局限流中间件（如果启用）
 	if rateLimitConfig.EnableAppLimit {
@@ -229,6 +248,9 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))
 	}).Methods("GET")
+
+	// Prometheus metrics 端点
+	router.Handle("/metrics", promhttp.Handler()).Methods("GET")
 
 	// Token 管理（需要 QiniuStub 认证）
 	router.HandleFunc("/api/v2/tokens", qstubMiddleware.Authenticate(tokenHandler.CreateToken)).Methods("POST")
@@ -247,7 +269,7 @@ func main() {
 	}
 	router.Handle("/api/v2/validate", validateTokenHandler).Methods("POST")
 
-	log.Println("✅ Routes configured")
+	slog.Info("Routes configured")
 
 	// ========================================
 	// 9. 启动服务器
@@ -257,14 +279,14 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("🌐 Server starting on http://localhost:%s", port)
-	log.Printf("📖 API Documentation: /root/src/auth/bearer-token-service.v2/docs/api/API.md")
-	log.Println("")
-	log.Println("✨ Bearer Token Service V2 is ready!")
-	log.Println("")
+	slog.Info("Bearer Token Service V2 is ready",
+		slog.String("port", port),
+		slog.String("metrics_endpoint", "/metrics"),
+		slog.String("health_endpoint", "/health"))
 
 	if err := http.ListenAndServe(":"+port, router); err != nil {
-		log.Fatalf("❌ Server failed to start: %v", err)
+		slog.Error("Server failed to start", slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 }
 

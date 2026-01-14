@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"bearer-token-service.v1/v2/interfaces"
+	"bearer-token-service.v1/v2/observability"
 )
 
 // ========================================
@@ -39,7 +40,11 @@ func (m *Middleware) AppLimitMiddleware(next http.Handler) http.Handler {
 		}
 
 		ctx := r.Context()
+		start := time.Now()
 		allowed, remaining, resetTime, err := m.manager.CheckAppLimit(ctx)
+
+		// 记录限流检查耗时
+		observability.RateLimitCheckDuration.Observe(time.Since(start).Seconds())
 
 		// 设置限流响应头
 		if remaining >= 0 {
@@ -56,6 +61,9 @@ func (m *Middleware) AppLimitMiddleware(next http.Handler) http.Handler {
 		}
 
 		if !allowed {
+			// 记录限流命中
+			observability.RateLimitHitsTotal.WithLabelValues("app").Inc()
+
 			retryAfter := time.Until(resetTime).Seconds()
 			if retryAfter < 0 {
 				retryAfter = 0
@@ -96,7 +104,11 @@ func (m *Middleware) AccountLimitMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 检查账户限流
+		start := time.Now()
 		allowed, remaining, resetTime, err := m.manager.CheckAccountLimit(ctx, accountID, account.RateLimit)
+
+		// 记录限流检查耗时
+		observability.RateLimitCheckDuration.Observe(time.Since(start).Seconds())
 
 		// 设置限流响应头
 		if account.RateLimit != nil && remaining >= 0 {
@@ -113,6 +125,9 @@ func (m *Middleware) AccountLimitMiddleware(next http.Handler) http.Handler {
 		}
 
 		if !allowed {
+			// 记录限流命中
+			observability.RateLimitHitsTotal.WithLabelValues("account").Inc()
+
 			retryAfter := time.Until(resetTime).Seconds()
 			if retryAfter < 0 {
 				retryAfter = 0
@@ -153,7 +168,11 @@ func (m *Middleware) TokenLimitMiddleware(next http.Handler) http.Handler {
 		}
 
 		// 检查 Token 限流
+		start := time.Now()
 		allowed, remaining, resetTime, err := m.manager.CheckTokenLimit(ctx, token.ID, token.RateLimit)
+
+		// 记录限流检查耗时
+		observability.RateLimitCheckDuration.Observe(time.Since(start).Seconds())
 
 		// 设置限流响应头
 		if token.RateLimit != nil && remaining >= 0 {
@@ -170,6 +189,9 @@ func (m *Middleware) TokenLimitMiddleware(next http.Handler) http.Handler {
 		}
 
 		if !allowed {
+			// 记录限流命中
+			observability.RateLimitHitsTotal.WithLabelValues("token").Inc()
+
 			retryAfter := time.Until(resetTime).Seconds()
 			if retryAfter < 0 {
 				retryAfter = 0
