@@ -386,10 +386,13 @@ package: ## 打包生产部署文件（镜像 + 配置）
 	@echo ""
 	@echo "$(COLOR_INFO)5. 生成测试脚本...$(COLOR_RESET)"
 	@rm -rf dist/deploy/tests
-	@cp -r tests dist/deploy/
+	@mkdir -p dist/deploy/tests
+	@cp tests/test_qstub_api.sh dist/deploy/tests/
+	@cp tests/test_redis_cache.sh dist/deploy/tests/
 	@sed -i 's|http://localhost:8081|http://localhost|g' dist/deploy/tests/test_qstub_api.sh 2>/dev/null || true
-	@sed -i 's|http://localhost:8081|http://localhost|g' dist/deploy/tests/test_rate_limit.sh 2>/dev/null || true
-	@echo "  - tests/ (已调整为生产环境配置: http://localhost)"
+	@sed -i 's|http://localhost:8081|http://localhost|g' dist/deploy/tests/test_redis_cache.sh 2>/dev/null || true
+	@echo "  - tests/test_qstub_api.sh"
+	@echo "  - tests/test_redis_cache.sh"
 	@echo ""
 	@echo "$(COLOR_INFO)6. 检查部署说明...$(COLOR_RESET)"
 	@[ -f dist/deploy/DEPLOY.md ] && echo "  ✅ DEPLOY.md (已存在)" || echo "  ⚠️  DEPLOY.md 不存在，请创建"

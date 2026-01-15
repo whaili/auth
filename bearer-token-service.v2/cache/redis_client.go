@@ -10,7 +10,7 @@ import (
 // RedisClient Redis 客户端接口
 type RedisClient interface {
 	Get(ctx context.Context, key string) (string, error)
-	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	Set(ctx context.Context, key string, value any, ttl time.Duration) error
 	Del(ctx context.Context, keys ...string) error
 	Ping(ctx context.Context) error
 	Close() error
@@ -24,12 +24,13 @@ type RedisClientImpl struct {
 // NewRedisClient 创建 Redis 客户端
 func NewRedisClient(addr, password string, db, poolSize, minIdleConns, maxRetries int) (RedisClient, error) {
 	client := redis.NewClient(&redis.Options{
-		Addr:         addr,
-		Password:     password,
-		DB:           db,
-		PoolSize:     poolSize,
-		MinIdleConns: minIdleConns,
-		MaxRetries:   maxRetries,
+		Addr:            addr,
+		Password:        password,
+		DB:              db,
+		PoolSize:        poolSize,
+		MinIdleConns:    minIdleConns,
+		MaxRetries:      maxRetries,
+		DisableIndentity: true, // 禁用 CLIENT SETINFO，兼容 Redis < 7.2
 	})
 
 	// 健康检查
@@ -49,7 +50,7 @@ func (r *RedisClientImpl) Get(ctx context.Context, key string) (string, error) {
 }
 
 // Set 设置键值
-func (r *RedisClientImpl) Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error {
+func (r *RedisClientImpl) Set(ctx context.Context, key string, value any, ttl time.Duration) error {
 	return r.client.Set(ctx, key, value, ttl).Err()
 }
 
