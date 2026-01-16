@@ -1,6 +1,6 @@
 # Bearer Token Service V2
 
-> 多租户 Token 认证服务 - 基于 QiniuStub 认证、秒级过期时间精度
+> Token 认证服务 - 基于 QiniuStub 认证、秒级过期时间精度
 
 [![Go Version](https://img.shields.io/badge/Go-1.21+-blue.svg)](https://golang.org)
 [![MongoDB](https://img.shields.io/badge/MongoDB-4.0+-green.svg)](https://www.mongodb.com)
@@ -18,8 +18,7 @@
 ## ✨ 核心特性
 
 - **QiniuStub 认证**: 使用七牛内部用户系统认证（UID + IUID）
-- **多租户隔离**: 完全的数据隔离，支持 SaaS 化部署
-- **秒级过期时间**: ⭐ 支持秒级精度的 Token 过期时间设置
+- **秒级过期时间**: 支持秒级精度的 Token 过期时间设置
 - **IAM 子账户支持**: 支持主账户（UID）和 IAM 子账户（UID + IUID）
 - **审计日志**: 完整的操作审计记录
 - **限流功能**: 三层限流（应用/账户/Token）
