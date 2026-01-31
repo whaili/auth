@@ -39,6 +39,8 @@ Thumbs.db
 
 # 部署产物
 dist/
+*.tar
+*.tgz
 deploy/docker-compose/.env
 deploy/docker-compose/logs/
 deploy/docker-compose/nginx/logs/
