@@ -42,8 +42,6 @@ tags:
     description: Bearer Token 的创建、查询、更新、删除
   - name: Token 验证
     description: Bearer Token 的验证和权限检查
-  - name: 审计日志
-    description: 操作审计日志查询
   - name: 健康检查
     description: 服务健康状态检查
 
@@ -106,7 +104,9 @@ paths:
                   example: 7776000
                 prefix:
                   type: string
-                  description: 自定义 Token 前缀（仅小写字母，系统自动添加分隔线，如 mk 生成 mk-xxx）
+                  description: 自定义 Token 前缀（支持小写字母、数字和下划线，最大 12 字符，系统自动添加分隔线，如 mk 生成 mk-xxx）
+                  maxLength: 12
+                  pattern: "^[a-z0-9_]+$"
                   example: mk
                 rate_limit:
                   type: object
@@ -162,9 +162,10 @@ paths:
               schema:
                 type: object
                 properties:
-                  uid:
+                  account_id:
                     type: string
-                    example: "1234567"
+                    description: 账户 ID（格式为 qiniu_{uid}）
+                    example: qiniu_1234567
                   tokens:
                     type: array
                     items:
@@ -271,16 +272,9 @@ paths:
               schema:
                 type: object
                 properties:
-                  token_id:
+                  message:
                     type: string
-                    example: tk_9z8y7x6w5v4u
-                  is_active:
-                    type: boolean
-                    example: false
-                  updated_at:
-                    type: string
-                    format: date-time
-                    example: 2025-12-25T10:30:00Z
+                    example: Token status updated successfully
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -385,71 +379,6 @@ paths:
                     type: string
                     example: Token has expired
 
-  /api/v2/audit-logs:
-    get:
-      summary: 查询审计日志
-      description: 查询当前账户的操作审计日志
-      tags:
-        - 审计日志
-      security:
-        - QstubAuth: []
-      parameters:
-        - name: action
-          in: query
-          description: 过滤操作类型
-          schema:
-            type: string
-            example: create_token
-        - name: resource_id
-          in: query
-          description: 过滤资源 ID
-          schema:
-            type: string
-        - name: start_time
-          in: query
-          description: 开始时间（ISO 8601）
-          schema:
-            type: string
-            format: date-time
-        - name: end_time
-          in: query
-          description: 结束时间（ISO 8601）
-          schema:
-            type: string
-            format: date-time
-        - name: limit
-          in: query
-          description: 返回数量
-          schema:
-            type: integer
-            default: 50
-        - name: offset
-          in: query
-          description: 偏移量
-          schema:
-            type: integer
-            default: 0
-      responses:
-        '200':
-          description: 审计日志获取成功
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  uid:
-                    type: string
-                    example: "1234567"
-                  logs:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/AuditLog'
-                  total:
-                    type: integer
-                    example: 1
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-
 components:
   securitySchemes:
     QstubAuth:
@@ -474,54 +403,37 @@ components:
         格式: `Bearer <TOKEN>`
 
   schemas:
-    AccountInfo:
-      type: object
-      properties:
-        id:
-          type: string
-          example: acc_1a2b3c4d5e6f
-        email:
-          type: string
-          example: user@example.com
-        company:
-          type: string
-          example: Example Inc
-        access_key:
-          type: string
-          example: AK_f8e7d6c5b4a392817a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4
-        status:
-          type: string
-          example: active
-        created_at:
-          type: string
-          format: date-time
-          example: 2025-12-25T10:00:00Z
-        updated_at:
-          type: string
-          format: date-time
-          example: 2025-12-25T10:00:00Z
-
     Token:
       type: object
+      description: Token 创建响应（完整 token 仅在创建时返回一次）
       properties:
         token_id:
           type: string
           example: tk_9z8y7x6w5v4u
         token:
           type: string
+          description: 完整 token 值（仅在创建时返回，请妥善保存）
           example: mk-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2
-        uid:
+        account_id:
           type: string
-          example: "1234567"
+          description: 账户 ID（格式为 qiniu_{uid}）
+          example: qiniu_1234567
         description:
           type: string
           example: Production token
         rate_limit:
           type: object
+          description: API 频率限制配置
           properties:
             requests_per_minute:
               type: integer
               example: 1000
+            requests_per_hour:
+              type: integer
+              example: 10000
+            requests_per_day:
+              type: integer
+              example: 100000
         created_at:
           type: string
           format: date-time
@@ -529,6 +441,7 @@ components:
         expires_at:
           type: string
           format: date-time
+          description: 过期时间（null 表示永不过期）
           example: 2026-03-25T10:00:00Z
         is_active:
           type: boolean
@@ -542,10 +455,24 @@ components:
           example: tk_9z8y7x6w5v4u
         token_preview:
           type: string
+          description: Token 预览（中间隐藏）
           example: sk-a1b2c3d4****e5f6g7h8
         description:
           type: string
           example: Production token
+        rate_limit:
+          type: object
+          description: API 频率限制配置
+          properties:
+            requests_per_minute:
+              type: integer
+              example: 1000
+            requests_per_hour:
+              type: integer
+              example: 10000
+            requests_per_day:
+              type: integer
+              example: 100000
         created_at:
           type: string
           format: date-time
@@ -553,61 +480,69 @@ components:
         expires_at:
           type: string
           format: date-time
+          description: 过期时间（null 表示永不过期）
           example: 2026-03-25T10:00:00Z
         is_active:
           type: boolean
           example: true
+        status:
+          type: string
+          description: Token 综合状态
+          enum:
+            - normal
+            - expired
+            - disabled
+          example: normal
         total_requests:
           type: integer
           example: 12567
         last_used_at:
           type: string
           format: date-time
+          description: 最后使用时间（null 表示从未使用）
           example: 2025-12-25T09:45:00Z
-
-    AuditLog:
-      type: object
-      properties:
-        id:
-          type: string
-          example: log_xyz123
-        uid:
-          type: string
-          example: "1234567"
-        action:
-          type: string
-          example: create_token
-        resource_id:
-          type: string
-          example: tk_9z8y7x6w5v4u
-        ip:
-          type: string
-          example: 203.0.113.42
-        user_agent:
-          type: string
-          example: Mozilla/5.0...
-        result:
-          type: string
-          example: success
-        timestamp:
-          type: string
-          format: date-time
-          example: 2025-12-25T10:00:00Z
 
     Error:
       type: object
+      description: |
+        错误响应结构
+
+        ## 业务错误码说明
+
+        ### 认证相关 (4001-4099)
+        | 错误码 | 消息 | 说明 |
+        |--------|------|------|
+        | 4004 | Invalid bearer token | Bearer Token 无效 |
+        | 4005 | Token has expired | Token 已过期 |
+        | 4006 | Token is disabled | Token 已被禁用 |
+
+        ### 资源相关 (4041-4099)
+        | 错误码 | 消息 | 说明 |
+        |--------|------|------|
+        | 4041 | Token not found | Token 不存在 |
+        | 4042 | Account not found | 账户不存在 |
+
+        ### 限流相关 (4291-4299)
+        | 错误码 | 消息 | 说明 |
+        |--------|------|------|
+        | 4291 | Too many requests | 请求频率超限 |
+        | 4292 | Rate limit exceeded | Token 频率限制超限 |
       properties:
         code:
           type: integer
-          example: 4001
+          description: 业务错误码
+          example: 4004
         message:
           type: string
-          example: Invalid signature
+          description: 错误消息
+          example: Invalid bearer token
         details:
           type: string
-          example: The provided signature does not match the expected signature
+          description: 错误详情
+          example: The provided token is invalid or malformed
         request_id:
           type: string
+          description: 请求追踪 ID
           example: req_abc123
 
   responses:
@@ -629,11 +564,35 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-          example:
-            code: 401
-            message: Authentication failed
-            details: Invalid or expired credentials
-            request_id: req_abc123
+          examples:
+            invalid_token:
+              summary: Token 无效
+              value:
+                code: 4004
+                message: Invalid bearer token
+                details: The provided token is invalid or malformed
+                request_id: req_abc123
+            token_expired:
+              summary: Token 已过期
+              value:
+                code: 4005
+                message: Token has expired
+                details: The token has expired, please create a new one
+                request_id: req_abc123
+            token_disabled:
+              summary: Token 已禁用
+              value:
+                code: 4006
+                message: Token is disabled
+                details: The token has been disabled
+                request_id: req_abc123
+            qstub_auth_failed:
+              summary: QiniuStub 认证失败
+              value:
+                code: 401
+                message: Authentication failed
+                details: Invalid QiniuStub authorization header
+                request_id: req_abc123
 
     Forbidden:
       description: 权限不足
@@ -653,11 +612,21 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
-          example:
-            code: 404
-            message: Resource not found
-            details: The requested resource does not exist
-            request_id: req_abc123
+          examples:
+            token_not_found:
+              summary: Token 不存在
+              value:
+                code: 4041
+                message: Token not found
+                details: The requested token does not exist
+                request_id: req_abc123
+            account_not_found:
+              summary: 账户不存在
+              value:
+                code: 4042
+                message: Account not found
+                details: The requested account does not exist
+                request_id: req_abc123
 
     TooManyRequests:
       description: 请求过于频繁
@@ -665,8 +634,42 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+          examples:
+            app_rate_limit:
+              summary: 应用级限流
+              value:
+                code: 4291
+                message: Too many requests
+                details: Rate limit exceeded
+                request_id: req_abc123
+            token_rate_limit:
+              summary: Token级限流
+              value:
+                code: 4292
+                message: Rate limit exceeded
+                details: Token rate limit exceeded
+                request_id: req_abc123
+
+    InternalServerError:
+      description: 服务器内部错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
           example:
-            code: 429
-            message: Too many requests
-            details: Rate limit exceeded
+            code: 500
+            message: Internal server error
+            details: An unexpected error occurred
+            request_id: req_abc123
+
+    ServiceUnavailable:
+      description: 服务不可用
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: 503
+            message: Service unavailable
+            details: The service is temporarily unavailable, please try again later
             request_id: req_abc123

@@ -411,57 +411,6 @@ Authorization: QiniuStub uid=1369077332&ut=1
 }
 ```
 
-### 4. 查询审计日志
-
-查询Token相关的操作审计日志。
-
-```bash
-GET /api/v2/audit-logs?action=create_token&limit=50
-```
-
-**请求头**:
-```
-Authorization: QiniuStub uid=1369077332&ut=1
-```
-
-**查询参数**:
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| action | string | 过滤操作类型(如 `create_token`, `delete_token`, `validate_token`) |
-| resource_id | string | 过滤资源 ID（如 token_id） |
-| start_time | string | 开始时间(ISO 8601格式) |
-| end_time | string | 结束时间(ISO 8601格式) |
-| limit | integer | 返回数量(默认 50) |
-| offset | integer | 偏移量(默认 0) |
-
-**响应示例**:
-```json
-{
-  "account_id": "acc_1a2b3c4d5e6f",
-  "logs": [
-    {
-      "id": "log_xyz123",
-      "account_id": "acc_1a2b3c4d5e6f",
-      "action": "create_token",
-      "resource_id": "tk_9z8y7x6w5v4u",
-      "ip": "203.0.113.42",
-      "user_agent": "Mozilla/5.0...",
-      "result": "success",
-      "timestamp": "2025-12-30T10:00:00Z"
-    }
-  ],
-  "total": 1
-}
-```
-
-**常见的审计操作类型**:
-- `create_token`: 创建Token
-- `delete_token`: 删除Token
-- `update_token_status`: 更新Token状态
-- `validate_token`: 验证Token
-- `view_token`: 查看Token详情
-
 ---
 
 ## 系统概述

@@ -1,0 +1,19 @@
+apiVersion: v2
+name: bearer-token-service
+description: A Helm chart for Bearer Token Service V2 - Multi-tenant Token Authentication Service
+type: application
+version: 2.0.0
+appVersion: "v2.0.0"
+
+keywords:
+  - authentication
+  - token
+  - bearer-token
+  - api
+
+maintainers:
+  - name: MikuStream Team
+    email: mikustream@qiniu.com
+
+sources:
+  - https://github.com/qiniu/bearer-token-service

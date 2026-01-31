@@ -3,7 +3,7 @@
 # ========================================
 # 运行预编译的二进制文件（在 vm-test 中编译）
 
-FROM alpine:3.19
+FROM aslan-spock-register.qiniu.io/miku-stream/test-alpine:latest
 
 # 安装运行时依赖
 RUN apk add --no-cache \

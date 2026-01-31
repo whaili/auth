@@ -1,0 +1,10 @@
+# 测试结果（每次运行都不同）
+results/*.json
+
+# 测试数据（包含实际 token）
+data/tokens.csv
+data/accounts.csv
+
+# 临时文件
+*.log
+*.tmp

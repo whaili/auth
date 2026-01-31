@@ -1,0 +1,93 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "bearer-token-service.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bearer-token-service.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.hpa.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "bearer-token-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "bearer-token-service.selectorLabels" . | nindent 8 }}
+      annotations:
+        {{- if .Values.prometheus.enabled }}
+        prometheus.io/scrape: {{ .Values.prometheus.scrape | quote }}
+        prometheus.io/port: {{ .Values.prometheus.port | quote }}
+        prometheus.io/path: {{ .Values.prometheus.path | quote }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "bearer-token-service.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "bearer-token-service.fullname" . }}-config
+          env:
+            - name: MONGO_URI
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bearer-token-service.fullname" . }}-secrets
+                  key: MONGO_URI
+            {{- if or .Values.redis.enabled .Values.externalRedis.addr }}
+            - name: REDIS_ENABLED
+              value: "true"
+            - name: REDIS_ADDR
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bearer-token-service.fullname" . }}-secrets
+                  key: REDIS_ADDR
+            {{- if .Values.externalRedis.password }}
+            - name: REDIS_PASSWORD
+              value: {{ .Values.externalRedis.password | quote }}
+            {{- end }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      restartPolicy: Always
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

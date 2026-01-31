@@ -1,0 +1,36 @@
+# ========================================
+# Bearer Token Service V2 - 测试环境配置
+# ========================================
+# 使用内置 MongoDB + Redis
+
+replicaCount: 1
+
+# 启用内置 MongoDB
+mongodb:
+  enabled: true
+  auth:
+    username: admin
+    password: changeme-testing
+    database: token_service_v2
+
+# 启用内置 Redis
+redis:
+  enabled: true
+
+# 启用 Ingress
+ingress:
+  enabled: true
+  className: ""
+  annotations:
+    kubernetes.io/ingress.class: nginx
+  host: bearer-token-test.qiniu.io
+
+# 测试环境配置
+config:
+  ginMode: "debug"
+  logLevel: "debug"
+  skipIndexCreation: "false"
+  rateLimit:
+    app: false
+    account: false
+    token: false

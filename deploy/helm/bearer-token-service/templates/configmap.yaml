@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "bearer-token-service.fullname" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "bearer-token-service.labels" . | nindent 4 }}
+data:
+  PORT: {{ .Values.config.port | quote }}
+  GIN_MODE: {{ .Values.config.ginMode | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  MONGO_DATABASE: {{ .Values.config.mongoDatabase | quote }}
+  QINIU_UID_MAPPER_MODE: {{ .Values.config.qiniuUidMapperMode | quote }}
+  QINIU_UID_AUTO_CREATE: {{ .Values.config.qiniuUidAutoCreate | quote }}
+  SKIP_INDEX_CREATION: {{ .Values.config.skipIndexCreation | quote }}
+  ENABLE_APP_RATE_LIMIT: {{ .Values.config.rateLimit.app | quote }}
+  ENABLE_ACCOUNT_RATE_LIMIT: {{ .Values.config.rateLimit.account | quote }}
+  ENABLE_TOKEN_RATE_LIMIT: {{ .Values.config.rateLimit.token | quote }}
+  {{- if or .Values.redis.enabled .Values.externalRedis.url }}
+  REDIS_ENABLED: "true"
+  {{- else }}
+  REDIS_ENABLED: "false"
+  {{- end }}

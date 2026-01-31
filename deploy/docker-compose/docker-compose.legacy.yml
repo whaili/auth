@@ -1,0 +1,268 @@
+# ========================================
+# Bearer Token Service V2 - Docker Compose (Legacy)
+# ========================================
+# 兼容 docker-compose 1.25.0+ 版本
+# ⚠️ 注意：此版本不支持 profiles 和健康检查依赖
+#
+# 部署模式：
+#   1. 本地开发/测试: 启动 mongodb 服务
+#      docker-compose -f docker-compose.legacy.yml up -d redis mongodb mongodb-init bearer-token-service nginx
+#   2. 生产环境: 跳过 mongodb，使用外部数据库
+#      docker-compose -f docker-compose.legacy.yml up -d redis bearer-token-service-production nginx
+# ========================================
+
+version: '3.7'
+
+services:
+  # ========================================
+  # Redis 缓存（可选，提升性能）
+  # ========================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: bearer-token-redis
+    restart: unless-stopped
+    command: ["sh", "-c", "redis-server --appendonly yes $${REDIS_PASSWORD:+--requirepass $$REDIS_PASSWORD}"]
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    networks:
+      - bearer-token-net
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ========================================
+  # MongoDB 数据库（仅用于本地开发/测试）
+  # ========================================
+  mongodb:
+    image: mongo:7.0
+    container_name: bearer-token-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+    volumes:
+      # 数据持久化（生产环境必须挂载）
+      - mongodb_data:/data/db
+      # 配置文件（可选）
+      - mongodb_config:/data/configdb
+    networks:
+      - bearer-token-net
+    ports:
+      # 只在需要外部访问时暴露（生产建议不暴露）
+      - "27017:27017"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ========================================
+  # MongoDB 初始化（仅用于本地模式）
+  # ========================================
+  mongodb-init:
+    image: mongo:latest
+    container_name: bearer-token-mongodb-init
+    # 注意：v3.7 不支持健康检查条件，需要等待 MongoDB 就绪后再启动
+    depends_on:
+      - mongodb
+    environment:
+      MONGO_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
+      MONGO_DATABASE: ${MONGO_DATABASE:-token_service_v2}
+    volumes:
+      - ./scripts/init:/scripts/init:ro
+    networks:
+      - bearer-token-net
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        echo '⏳ 等待 MongoDB 就绪...'
+        while ! mongosh "mongodb://mongodb:27017/admin" --eval "db.adminCommand('ping')" --quiet > /dev/null 2>&1; do
+          echo '   MongoDB 尚未就绪，5秒后重试...'
+          sleep 5
+        done
+        echo '✅ MongoDB 已就绪'
+        echo ''
+        echo '🔧 初始化数据库索引...'
+        if mongosh "mongodb://$${MONGO_USERNAME}:$${MONGO_PASSWORD}@mongodb:27017/$${MONGO_DATABASE}?authSource=admin" --file /scripts/init/init-indexes.js --quiet; then
+          echo '✅ 数据库初始化完成'
+        else
+          echo '❌ 数据库初始化失败'
+          exit 1
+        fi
+    restart: "no"
+
+  # ========================================
+  # Bearer Token Service - 本地模式
+  # ========================================
+  bearer-token-service:
+    image: bearer-token-service:${VERSION:-latest}
+    container_name: bearer-token-service
+    restart: unless-stopped
+    # 注意：v3.7 不支持 condition，只能简单依赖
+    depends_on:
+      - mongodb
+      - mongodb-init
+      - redis
+    networks:
+      bearer-token-net:
+        aliases:
+          - backend
+    environment:
+      # 基础配置
+      PORT: ${PORT:-8080}
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD:-changeme}@mongodb:27017/${MONGO_DATABASE:-token_service_v2}?authSource=admin
+
+      # 数据库索引管理（本地模式由 mongodb-init 创建）
+      SKIP_INDEX_CREATION: ${SKIP_INDEX_CREATION:-true}
+
+      # 账户查询配置
+      ACCOUNT_FETCHER_MODE: ${ACCOUNT_FETCHER_MODE:-local}
+      EXTERNAL_ACCOUNT_API_URL: ${EXTERNAL_ACCOUNT_API_URL:-}
+      EXTERNAL_ACCOUNT_API_TOKEN: ${EXTERNAL_ACCOUNT_API_TOKEN:-}
+
+      # UID 映射配置
+      QINIU_UID_MAPPER_MODE: ${QINIU_UID_MAPPER_MODE:-simple}
+      QINIU_UID_AUTO_CREATE: ${QINIU_UID_AUTO_CREATE:-false}
+
+      # HMAC 配置
+      HMAC_TIMESTAMP_TOLERANCE: ${HMAC_TIMESTAMP_TOLERANCE:-15m}
+
+      # Redis 缓存配置
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      CACHE_TOKEN_TTL: ${CACHE_TOKEN_TTL:-5m}
+
+      # 可观测性配置
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_FILE: ${LOG_FILE:-}
+
+      # MongoDB 连接重试配置（重要！）
+      MONGO_CONNECT_TIMEOUT: 30s
+      MONGO_MAX_RETRIES: 10
+      MONGO_RETRY_INTERVAL: 5s
+    volumes:
+      # 日志持久化
+      - ./logs:/app/logs
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ========================================
+  # Bearer Token Service - 生产模式（外部 MongoDB）
+  # ========================================
+  bearer-token-service-production:
+    image: bearer-token-service:${VERSION:-latest}
+    container_name: bearer-token-service-prod
+    restart: unless-stopped
+    depends_on:
+      - redis
+    networks:
+      bearer-token-net:
+        aliases:
+          - backend
+    environment:
+      # 基础配置
+      PORT: ${PORT:-8080}
+
+      # 外部 MongoDB 副本集配置（从环境变量读取）
+      # 格式: mongodb://user:pass@host1:port1,host2:port2,host3:port3/dbname?replicaSet=rs0&authSource=admin
+      MONGO_URI: ${MONGO_URI}
+
+      # 账户查询配置（生产环境推荐 external）
+      ACCOUNT_FETCHER_MODE: ${ACCOUNT_FETCHER_MODE:-external}
+      EXTERNAL_ACCOUNT_API_URL: ${EXTERNAL_ACCOUNT_API_URL}
+      EXTERNAL_ACCOUNT_API_TOKEN: ${EXTERNAL_ACCOUNT_API_TOKEN}
+
+      # UID 映射配置
+      QINIU_UID_MAPPER_MODE: ${QINIU_UID_MAPPER_MODE:-database}
+      QINIU_UID_AUTO_CREATE: ${QINIU_UID_AUTO_CREATE:-false}
+
+      # HMAC 配置
+      HMAC_TIMESTAMP_TOLERANCE: ${HMAC_TIMESTAMP_TOLERANCE:-10m}
+
+      # Redis 缓存配置
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_ADDR: ${REDIS_ADDR:-redis:6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_DB: ${REDIS_DB:-0}
+      CACHE_TOKEN_TTL: ${CACHE_TOKEN_TTL:-5m}
+
+      # 可观测性配置
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      LOG_FILE: ${LOG_FILE:-}
+
+      # 数据库索引管理（生产环境必须跳过，由 init-db.sh 统一创建）
+      SKIP_INDEX_CREATION: ${SKIP_INDEX_CREATION:-true}
+    volumes:
+      # 日志持久化
+      - ./logs:/app/logs
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+  # ========================================
+  # Nginx 反向代理（生产环境推荐）
+  # ========================================
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: bearer-token-nginx
+    restart: unless-stopped
+    # 注意：根据使用的服务手动选择依赖
+    # 本地模式: depends_on: [bearer-token-service]
+    # 生产模式: depends_on: [bearer-token-service-production]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    networks:
+      - bearer-token-net
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+# ========================================
+# 网络配置
+# ========================================
+networks:
+  bearer-token-net:
+    driver: bridge
+
+# ========================================
+# 数据卷
+# ========================================
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+  redis_data:
+    driver: local

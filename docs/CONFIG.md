@@ -525,34 +525,17 @@ curl -i http://localhost:8080/health
 # 响应头: X-Request-ID: req_a1b2c3d4e5f6g7h8i9j0k1l2
 ```
 
-### 监控栈部署
+### 监控集成
 
-项目提供完整的 Prometheus + Grafana 监控栈：
+服务暴露 `/metrics` 端点供公共 Prometheus 采集，无需本地部署监控栈。
 
-```bash
-cd _cust/deployment/monitoring
-
-# 本地测试（简化版）
-docker-compose -f docker-compose.local.yml up -d
-
-# 生产环境（完整版）
-docker-compose -f docker-compose.monitoring.yml up -d
-```
-
-**访问地址**:
-- Prometheus: http://localhost:9090
-- Grafana: http://localhost:3000 (admin/admin)
-- AlertManager: http://localhost:9093
-
-**预置 Dashboard**:
-- Bearer Token Service - 服务概览
-- 包含: QPS、延迟、错误率、缓存命中率等面板
+**接入公共监控**:
+1. 在 Prometheus 中添加 scrape target
+2. 在 Grafana 中导入服务 Dashboard
 
 ---
 
-## 📚 相关文档
+## 相关文档
 
-- [架构设计文档](./ARCHITECTURE_DUAL_AUTH.md)
-- [API 文档](./API.md)
-- [部署指南](./DEPLOYMENT_SUMMARY.txt)
-- [快速参考](./QUICK_REF.md)
+- [API 文档](./api/API.md)
+- [部署指南](./deployment.md)

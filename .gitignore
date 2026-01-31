@@ -39,6 +39,12 @@ Thumbs.db
 
 # 部署产物
 dist/
+deploy/docker-compose/.env
+deploy/docker-compose/logs/
+deploy/docker-compose/nginx/logs/
+deploy/docker-compose/nginx/ssl/*.pem
+deploy/docker-compose/nginx/ssl/*.key
+deploy/docker-compose/nginx/ssl/*.crt
 
 # 临时文件
 tmp/

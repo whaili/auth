@@ -1,0 +1,165 @@
+# ========================================
+# Bearer Token Service V2 - Helm Values
+# ========================================
+# 默认配置（通用）
+
+replicaCount: 1
+
+image:
+  repository: aslan-spock-register.qiniu.io/miku-stream/bearer-token-service
+  tag: "v2.0.0"
+  pullPolicy: Always
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: "bearer-token-service"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls: []
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# 自动伸缩配置
+hpa:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+# 内置 MongoDB（测试环境用）
+mongodb:
+  enabled: false
+  image: aslan-spock-register.qiniu.io/miku-stream/mongo:7.0
+  storage: 1Gi
+  storageClassName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  auth:
+    username: admin
+    password: changeme-testing
+    database: token_service_v2
+
+# Nginx 反向代理
+nginx:
+  enabled: false
+  replicaCount: 1
+  image: nginx:1.25-alpine
+  service:
+    type: ClusterIP
+    port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# 内置 Redis
+redis:
+  enabled: false
+  image: aslan-spock-register.qiniu.io/miku-stream/redis:7.2-alpine
+  # 持久化存储（生产环境建议配置）
+  storage: ""
+  storageClassName: ""
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+# 外部 MongoDB 配置（生产环境用）
+externalMongodb:
+  # 完整 URI，例如: mongodb://user:pass@host:27017/dbname?authSource=admin
+  uri: ""
+
+# 外部 Redis 配置（生产环境用）
+externalRedis:
+  # 地址，格式: host:port
+  addr: ""
+  # 密码（可选）
+  password: ""
+
+# 应用配置
+config:
+  port: "8080"
+  ginMode: "release"
+  logLevel: "info"
+  logFormat: "json"
+  mongoDatabase: "token_service_v2"
+  qiniuUidMapperMode: "simple"
+  qiniuUidAutoCreate: "false"
+  skipIndexCreation: "false"
+  # 限流配置
+  rateLimit:
+    app: false
+    account: false
+    token: false
+
+# Pod 安全上下文
+podSecurityContext: {}
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+# 健康检查配置
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 15
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Prometheus 监控
+prometheus:
+  enabled: true
+  scrape: true
+  port: "8080"
+  path: "/metrics"
