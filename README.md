@@ -4,10 +4,11 @@
 
 ## 文档导航
 
-- [API 文档](docs/api/API.md)
-- [配置说明](docs/CONFIG.md)
-- [部署指南](docs/deployment.md)
-- [测试说明](tests/api/TESTING.md)
+- [部署和配置指南](docs/DEPLOYMENT.md) - 完整的部署和配置文档
+- [限流配置](docs/RATE_LIMIT.md) - 三层限流详解
+- [API 文档](docs/api/API.md) - API 接口说明
+- [测试说明](tests/api/TESTING.md) - 测试指南
+- [项目指南](CLAUDE.md) - 项目结构和开发指南
 
 ## 核心特性
 
@@ -141,3 +142,37 @@ curl -X POST "http://localhost:8080/api/v2/validate" \
 ## 许可证
 
 MIT License
+
+## 测试数据迁移
+
+本地开发和测试环境无法直接访问生产 MySQL，需要使用测试 MySQL (10.210.31.54)。
+
+### 快速开始
+
+```bash
+# 1. 从生产环境导出并混淆数据
+./deploy/scripts/migrate_test_data_v2.sh bearer_token_test_<用户名> 500
+
+# 2. 更新环境变量（使用脚本输出的配置）
+export MYSQL_HOST="10.210.31.54"
+export MYSQL_DATABASE="bearer_token_test_<your_db>"
+
+# 3. 启动服务
+go run cmd/server/main.go
+```
+
+### 文档
+
+- **快速开始**: [deploy/scripts/USAGE.md](deploy/scripts/USAGE.md)
+- **完整文档**: [deploy/scripts/README.md](deploy/scripts/README.md)
+- **技术方案**: [deploy/MYSQL_CONFIG.md](deploy/MYSQL_CONFIG.md)
+
+### 特性
+
+- ✅ 自动从生产环境导出数据
+- ✅ 自动混淆敏感信息（邮箱、用户名、密码、IP、手机号）
+- ✅ 支持自定义数据库名和导出数量
+- ✅ 完整的错误检查和数据验证
+
+详细说明请查看 [deploy/scripts/](deploy/scripts/) 目录。
+

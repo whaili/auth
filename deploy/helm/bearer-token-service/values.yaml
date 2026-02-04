@@ -107,6 +107,19 @@ externalRedis:
   # 密码（可选）
   password: ""
 
+# Qconf 配置（推荐 - 用于 RPC 获取用户信息）
+# 用于 /api/v2/validateu 端点获取用户详细信息
+qconf:
+  enabled: false
+  accessKey: ""
+  secretKey: ""
+  masterHosts: ""
+  mcHosts: ""
+  lcacheExpiresMs: "300000"
+  lcacheDurationMs: "60000"
+  lcacheChanBufSize: "1000"
+  mcRWTimeoutMs: "1000"
+
 # 应用配置
 config:
   port: "8080"

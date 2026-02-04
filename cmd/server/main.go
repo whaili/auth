@@ -12,7 +12,9 @@ import (
 	"github.com/qiniu/bearer-token-service/v2/cache"
 	"github.com/qiniu/bearer-token-service/v2/config"
 	"github.com/qiniu/bearer-token-service/v2/handlers"
+	"github.com/qiniu/bearer-token-service/v2/interfaces"
 	"github.com/qiniu/bearer-token-service/v2/observability"
+	"github.com/qiniu/bearer-token-service/v2/pkg/mysql"
 	"github.com/qiniu/bearer-token-service/v2/ratelimit"
 	"github.com/qiniu/bearer-token-service/v2/repository"
 	"github.com/qiniu/bearer-token-service/v2/service"
@@ -124,7 +126,63 @@ func main() {
 	}
 
 	// ========================================
-	// 3. 初始化 Redis 和缓存层（可选）
+	// 3. 初始化用户信息查询（UserInfoRepository）
+	// 支持两种方式：qconfapi RPC（推荐）或 MySQL 直接查询（备选）
+	// ========================================
+	var userInfoRepo interfaces.UserInfoRepository
+
+	// 优先尝试 qconfapi
+	qconfConfig := config.LoadQconfConfig()
+	if qconfConfig.IsValid() {
+		slog.Info("Initializing qconfapi connection...")
+		qconfapiClient, err := repository.InitQconfClient(qconfConfig.ToQconfapiConfig())
+		if err != nil {
+			slog.Error("Failed to initialize qconfapi", slog.String("error", err.Error()))
+			slog.Warn("qconfapi initialization failed, will try MySQL as fallback")
+		} else {
+			slog.Info("Connected to qconfapi",
+				slog.Int("master_hosts_count", len(qconfConfig.MasterHosts)),
+				slog.String("access_key", qconfConfig.AccessKey[:8]+"..."))
+
+			// 创建 RPC UserInfoRepository
+			userInfoRepo = repository.NewRPCUserInfoRepository(qconfapiClient)
+			slog.Info("UserInfoRepository initialized (qconfapi RPC)")
+		}
+	} else if !qconfConfig.Enabled {
+		slog.Info("qconfapi disabled (set QCONF_ENABLED=true to enable)")
+	}
+
+	// 如果 qconfapi 未配置或失败，尝试使用 MySQL
+	if userInfoRepo == nil {
+		mysqlConfig := config.LoadMySQLConfig()
+		mysqlEnabled := os.Getenv("MYSQL_ENABLED") == "true"
+
+		if mysqlEnabled {
+			slog.Info("Initializing MySQL connection...")
+			var mysqlClient *mysql.Client
+			var err error
+			mysqlClient, err = mysql.NewClient(mysqlConfig)
+			if err != nil {
+				slog.Error("Failed to connect to MySQL", slog.String("error", err.Error()))
+				slog.Warn("MySQL connection failed, /api/v2/validateu will return user_info: null")
+			} else {
+				defer mysqlClient.Close()
+				slog.Info("Connected to MySQL",
+					slog.String("host", mysqlConfig.Host),
+					slog.Int("port", mysqlConfig.Port),
+					slog.String("database", mysqlConfig.Database))
+
+				// 创建 MySQL UserInfoRepository
+				userInfoRepo = repository.NewMySQLUserInfoRepository(mysqlClient)
+				slog.Info("UserInfoRepository initialized (MySQL)")
+			}
+		} else {
+			slog.Info("MySQL disabled (set MYSQL_ENABLED=true to enable extended user info)")
+		}
+	}
+
+	// ========================================
+	// 4. 初始化 Redis 和缓存层（可选）
 	// ========================================
 	redisConfig := cache.LoadRedisConfig()
 
@@ -160,10 +218,20 @@ func main() {
 	}
 
 	// ========================================
-	// 4. 初始化 Service 层
+	// 5. 初始化 Service 层
 	// ========================================
 	tokenService := service.NewTokenService(tokenRepo, auditRepo)
-	validationService := service.NewValidationService(tokenRepo)
+
+	// 根据是否有 UserInfoRepository 创建不同的 ValidationService
+	var validationService interfaces.ValidationService
+	if userInfoRepo != nil {
+		validationService = service.NewValidationServiceWithUserInfo(tokenRepo, userInfoRepo)
+		slog.Info("ValidationService initialized with UserInfo support")
+	} else {
+		validationService = service.NewValidationService(tokenRepo)
+		slog.Info("ValidationService initialized (basic mode)")
+	}
+
 	_ = service.NewAuditService(auditRepo) // 预留用于未来的审计日志查询
 
 	slog.Info("Services initialized")
@@ -283,6 +351,14 @@ func main() {
 		validateTokenHandler = extractTokenMiddleware(rateLimitMiddleware.TokenLimitMiddleware(validateTokenHandler))
 	}
 	router.Handle("/api/v2/validate", validateTokenHandler).Methods("POST")
+
+	// Token 验证（扩展版，包含用户信息）
+	var validateTokenUHandler http.Handler = http.HandlerFunc(validationHandler.ValidateTokenU)
+	if rateLimitConfig.EnableTokenLimit {
+		// 提取 Token 到上下文，然后应用 Token 限流
+		validateTokenUHandler = extractTokenMiddleware(rateLimitMiddleware.TokenLimitMiddleware(validateTokenUHandler))
+	}
+	router.Handle("/api/v2/validateu", validateTokenUHandler).Methods("POST")
 
 	slog.Info("Routes configured")
 

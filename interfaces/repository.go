@@ -84,6 +84,13 @@ type AuditLogRepository interface {
 	DeleteOldLogs(ctx context.Context, olderThan time.Time) (int64, error)
 }
 
+// UserInfoRepository 用户信息数据访问接口（MySQL）
+type UserInfoRepository interface {
+	// GetUserInfoByUID 根据 UID 查询用户信息
+	GetUserInfoByUID(ctx context.Context, uid uint32) (*UserInfo, error)
+}
+
+
 // ========================================
 // Service 接口定义
 // ========================================
@@ -131,6 +138,9 @@ type TokenService interface {
 type ValidationService interface {
 	// ValidateToken 验证 Token
 	ValidateToken(ctx context.Context, req *TokenValidateRequest) (*TokenValidateResponse, error)
+
+	// ValidateTokenWithUserInfo 验证 Token 并返回扩展用户信息
+	ValidateTokenWithUserInfo(ctx context.Context, req *TokenValidateRequest) (*TokenValidateUResponse, error)
 
 	// RecordTokenUsage 记录 Token 使用
 	RecordTokenUsage(ctx context.Context, tokenValue string) error

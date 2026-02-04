@@ -48,7 +48,19 @@ redis:
 
 # 外部 MongoDB 配置
 externalMongodb:
-  uri: "mongodb://bearer_token_wr:ovViaN5wgBVwKuXIkVzqCBqoYIc2zkgu@10.70.65.41:27019,10.70.65.34:27019,10.70.65.39:27019/bearer_token_main?authSource=admin"
+  uri: "mongodb://bearer_token_wr:<YOUR_MONGO_PASSWORD>@10.70.65.41:27019,10.70.65.34:27019,10.70.65.39:27019/bearer_token_main?authSource=admin"
+
+# Qconf 配置（生产环境 - 推荐用于用户信息查询）
+qconf:
+  enabled: true
+  accessKey: "ppca4hFBYQ_ykozmLUcSIJi8eLnYhFahE0OF5MoZ"
+  secretKey: "<YOUR_PRODUCTION_QCONF_SECRET_KEY>"  # 替换为实际密钥
+  masterHosts: "http://10.34.35.42:8510,http://10.34.35.43:8510"
+  mcHosts: ""
+  lcacheExpiresMs: "300000"
+  lcacheDurationMs: "60000"
+  lcacheChanBufSize: "1000"
+  mcRWTimeoutMs: "1000"
 
 # 启用 Ingress
 ingress:

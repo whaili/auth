@@ -171,6 +171,72 @@ type DailyStat struct {
 	Requests int64  `json:"requests"`
 }
 
+// ========================================
+// /api/v2/validateu 扩展模型
+// ========================================
+
+// UserInfo 扩展用户信息（从 MySQL 查询）
+type UserInfo struct {
+	UID            uint32    `json:"uid"`
+	Email          string    `json:"email"`
+	Username       string    `json:"username"`                  // 显示名称
+	Utype          uint32    `json:"utype"`                     // 用户类型位掩码
+	Activated      bool      `json:"activated"`                 // 是否已激活
+	DisabledType   int       `json:"disabled_type"`             // 冻结类型
+	DisabledReason string    `json:"disabled_reason,omitempty"` // 冻结原因
+	DisabledAt     *time.Time `json:"disabled_at,omitempty"`    // 冻结时间
+	ParentUID      uint32    `json:"parent_uid,omitempty"`      // 父账户 UID
+	CreatedAt      int64     `json:"created_at"`                // Unix 时间戳（秒）
+	UpdatedAt      int64     `json:"updated_at"`                // Unix 时间戳（秒）
+	LastLoginAt    int64     `json:"last_login_at,omitempty"`   // Unix 时间戳（秒）
+}
+
+// IsDisabled 检查用户是否被禁用（bit 28）
+func (u *UserInfo) IsDisabled() bool {
+	return u.Utype&UserTypeDisabled != 0
+}
+
+// IsBuffered 检查用户是否处于缓冲期（bit 16）
+func (u *UserInfo) IsBuffered() bool {
+	return u.Utype&UserTypeBuffered > 0
+}
+
+// IsOverseas 检查是否为海外用户（bit 29）
+func (u *UserInfo) IsOverseas() bool {
+	return u.Utype&UserTypeOverseas > 0
+}
+
+// IsOverseasStd 检查是否为海外标准用户（bit 30）
+func (u *UserInfo) IsOverseasStd() bool {
+	return u.Utype&UserTypeOverseasStd > 0
+}
+
+// IsEnterprise 检查是否为企业用户（bit 2）
+func (u *UserInfo) IsEnterprise() bool {
+	return u.Utype&UserTypeEnterprise > 0
+}
+
+// TokenValidateUResponse /api/v2/validateu 响应（扩展了用户信息）
+type TokenValidateUResponse struct {
+	Valid     bool      `json:"valid"`
+	Message   string    `json:"message"`
+	TokenInfo *TokenInfoU `json:"token_info,omitempty"`
+}
+
+// TokenInfoU Token 信息（包含扩展用户信息）
+type TokenInfoU struct {
+	TokenID    string     `json:"token_id"`
+	AccountID  string     `json:"account_id,omitempty"`  // HMAC 用户使用
+	UID        string     `json:"uid,omitempty"`         // QiniuStub 用户使用（从 account_id 提取）
+	IUID       string     `json:"iuid,omitempty"`        // IAM 用户ID
+	IsActive   bool       `json:"is_active"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`  // nil 表示永不过期
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"` // nil 表示从未使用
+
+	// 扩展用户信息（MySQL 查询结果，查询失败时为 nil）
+	UserInfo   *UserInfo  `json:"user_info,omitempty"`
+}
+
 // AuditLogQuery 审计日志查询参数
 type AuditLogQuery struct {
 	Action     string    `form:"action"`      // 过滤操作类型
@@ -221,4 +287,40 @@ const (
 	// Audit Results
 	AuditResultSuccess = "success"
 	AuditResultFailure = "failure"
+
+	// ========================================
+	// Utype 用户类型位掩码常量
+	// ========================================
+
+	// Basic User Types
+	UserTypeQBox         = 0       // 普通七牛用户
+	UserTypeAdmin        = 1 << 0  // 管理员（bit 0）
+	UserTypeVIP          = 1 << 1  // VIP（bit 1）
+	UserTypeStdUser      = 1 << 2  // 标准/企业用户（bit 2）
+	UserTypeStdUser2     = 1 << 3  // 企业虚拟用户（bit 3）
+	UserTypeExpUser      = 1 << 4  // 体验用户（bit 4）
+	UserTypeParentUser   = 1 << 5  // 父账户（bit 5）
+	UserTypeOp           = 1 << 6  // 运维（bit 6）
+	UserTypeSupport      = 1 << 7  // 支持（bit 7）
+	UserTypeCC           = 1 << 8  // 呼叫中心（bit 8）
+	UserTypeQCOS         = 1 << 9  // QCOS 用户（bit 9）
+	UserTypePili         = 1 << 10 // Pili 用户（bit 10）
+	UserTypeFusion       = 1 << 11 // Fusion 用户（bit 11）
+	UserTypePandora      = 1 << 12 // Pandora 用户（bit 12）
+	UserTypeDistribution = 1 << 13 // 分发用户（bit 13）
+	UserTypeQVM          = 1 << 14 // QVM 用户（bit 14）
+	UserTypeUnregistered = 1 << 15 // 未注册（bit 15）
+
+	// Special Status Bits
+	UserTypeBuffered     = 1 << 16 // 缓冲期/宽限期（bit 16）
+	UserTypeUsers        = 1 << 17 // 用户标志（bit 17）
+	UserTypeSudoers      = 1 << 18 // 超级用户标志（bit 18）
+
+	UserTypeDisabled     = 1 << 28 // 已禁用（bit 28）
+	UserTypeOverseas     = 1 << 29 // 海外用户（bit 29）
+	UserTypeOverseasStd  = 1 << 30 // 海外标准用户（bit 30）
+
+	// Aliases
+	UserTypeEnterprise       = UserTypeStdUser
+	UserTypeEnterpriseVUser  = UserTypeStdUser2
 )

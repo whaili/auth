@@ -22,3 +22,15 @@ data:
   {{- else }}
   REDIS_ENABLED: "false"
   {{- end }}
+  {{- if .Values.qconf.enabled }}
+  # Qconf 配置（用于 RPC 获取用户信息）
+  QCONF_ENABLED: "true"
+  QCONF_MASTER_HOSTS: {{ .Values.qconf.masterHosts | quote }}
+  QCONF_MC_HOSTS: {{ .Values.qconf.mcHosts | quote }}
+  QCONF_LC_EXPIRES_MS: {{ .Values.qconf.lcacheExpiresMs | quote }}
+  QCONF_LC_DURATION_MS: {{ .Values.qconf.lcacheDurationMs | quote }}
+  QCONF_LC_CHAN_BUFSIZE: {{ .Values.qconf.lcacheChanBufSize | quote }}
+  QCONF_MC_RW_TIMEOUT_MS: {{ .Values.qconf.mcRWTimeoutMs | quote }}
+  {{- else }}
+  QCONF_ENABLED: "false"
+  {{- end }}

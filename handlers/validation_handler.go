@@ -59,3 +59,42 @@ func (h *ValidationHandlerImpl) ValidateToken(w http.ResponseWriter, r *http.Req
 	// 5. 返回成功响应
 	respondJSON(w, http.StatusOK, resp)
 }
+
+// ValidateTokenU 验证 Bearer Token 并返回扩展用户信息
+// POST /api/v2/validateu
+func (h *ValidationHandlerImpl) ValidateTokenU(w http.ResponseWriter, r *http.Request) {
+	// 1. 提取 Bearer Token
+	authHeader := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authHeader, "Bearer ") {
+		respondError(w, http.StatusUnauthorized, "invalid authorization header")
+		return
+	}
+
+	tokenValue := strings.TrimPrefix(authHeader, "Bearer ")
+
+	// 2. 调用验证服务（带用户信息）
+	req := &interfaces.TokenValidateRequest{
+		Token: tokenValue,
+	}
+
+	resp, err := h.validationService.ValidateTokenWithUserInfo(r.Context(), req)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// 3. 如果验证失败，返回 401
+	if !resp.Valid {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// 4. 记录使用（异步，不影响响应）
+	// 使用 context.Background() 因为 r.Context() 会在响应后取消
+	go h.validationService.RecordTokenUsage(context.Background(), tokenValue)
+
+	// 5. 返回成功响应
+	respondJSON(w, http.StatusOK, resp)
+}

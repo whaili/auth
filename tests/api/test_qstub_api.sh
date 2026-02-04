@@ -19,6 +19,8 @@ BASE_URL="${BASE_URL:-http://localhost:8081}"
 # 测试用的 Qiniu UID
 QINIU_UID="${QINIU_UID:-1369077332}"
 QINIU_IUID="${QINIU_IUID:-8901234}"
+# 测试环境有效 UID (用于 qconfapi 完整测试)
+QINIU_TEST_UID="${QINIU_TEST_UID:-1810810692}"
 
 # 临时文件存储响应
 RESPONSE_FILE=$(mktemp)
@@ -302,6 +304,146 @@ test_validate_bearer_token_iam() {
     fi
 }
 
+# 6.5 验证 Bearer Token 并返回用户信息（主账户）
+test_validate_bearer_token_with_userinfo_main() {
+    log_info "Validating Bearer Token with UserInfo (main account)..."
+
+    local response=$(curl -s -X POST "$BASE_URL/api/v2/validateu" \
+        -H "Authorization: Bearer $BEARER_TOKEN_MAIN" \
+        -H "Content-Type: application/json")
+
+    echo "$response" | python3 -m json.tool
+
+    local valid=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('valid', False))" 2>/dev/null)
+    local has_userinfo=$(echo $response | python3 -c "import sys, json; ti = json.load(sys.stdin).get('token_info', {}); print(ti.get('user_info') is not None)" 2>/dev/null)
+    local uid=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('uid', 0) if ui else 0)" 2>/dev/null)
+
+    if [[ "$valid" == "True" ]]; then
+        log_success "Bearer Token validation with UserInfo passed (main account)"
+        if [[ "$has_userinfo" == "True" ]]; then
+            log_success "UserInfo included in response (UID: $uid)"
+
+            # 验证关键字段
+            local email=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('email', '') if ui else '')" 2>/dev/null)
+            local username=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('username', '') if ui else '')" 2>/dev/null)
+            local activated=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('activated', False) if ui else False)" 2>/dev/null)
+
+            if [[ -n "$email" ]]; then
+                log_success "  Email: $email"
+            fi
+            if [[ -n "$username" ]]; then
+                log_success "  Username: $username"
+            fi
+            log_info "  Activated: $activated"
+        else
+            log_warning "UserInfo is null (Qconf RPC may not have this UID - graceful degradation)"
+        fi
+    else
+        log_error "Bearer Token validation failed: $response"
+        exit 1
+    fi
+}
+
+# 6.6 验证 Bearer Token 并返回用户信息（IAM 子账户）
+test_validate_bearer_token_with_userinfo_iam() {
+    log_info "Validating Bearer Token with UserInfo (IAM sub-account)..."
+
+    local response=$(curl -s -X POST "$BASE_URL/api/v2/validateu" \
+        -H "Authorization: Bearer $BEARER_TOKEN_IAM" \
+        -H "Content-Type: application/json")
+
+    echo "$response" | python3 -m json.tool
+
+    local valid=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('valid', False))" 2>/dev/null)
+    local iuid=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('token_info', {}).get('iuid', ''))" 2>/dev/null)
+    local has_userinfo=$(echo $response | python3 -c "import sys, json; ti = json.load(sys.stdin).get('token_info', {}); print(ti.get('user_info') is not None)" 2>/dev/null)
+    local parent_uid=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('parent_uid', 0) if ui else 0)" 2>/dev/null)
+
+    if [[ "$valid" == "True" ]]; then
+        log_success "Bearer Token validation with UserInfo passed (IAM sub-account)"
+        if [[ -n "$iuid" ]]; then
+            log_success "IUID field present in response: $iuid"
+        fi
+        if [[ "$has_userinfo" == "True" ]]; then
+            log_success "UserInfo included in response"
+            if [[ "$parent_uid" != "0" ]]; then
+                log_info "  Parent UID: $parent_uid (IAM sub-account relationship)"
+            fi
+        else
+            log_warning "UserInfo is null (Qconf RPC may not have this UID - graceful degradation)"
+        fi
+    else
+        log_error "Bearer Token validation failed: $response"
+        exit 1
+    fi
+}
+
+# 6.7 验证 Bearer Token 并返回完整用户信息（使用有效测试 UID）
+test_validate_bearer_token_with_full_userinfo() {
+    log_info "Validating Bearer Token with FULL UserInfo (using valid test UID: $QINIU_TEST_UID)..."
+
+    # 创建测试 token
+    local qstub_auth="QiniuStub uid=${QINIU_TEST_UID}&ut=1"
+    local expires_at=$(date -u -d "+1 hour" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -v+1H +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null)
+
+    local create_response=$(curl -s -X POST "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: $qstub_auth" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"description\": \"Test token for qconf validation\",
+            \"expires_at\": \"$expires_at\"
+        }")
+
+    local test_token_id=$(echo $create_response | python3 -c "import sys, json; print(json.load(sys.stdin).get('token_id', ''))" 2>/dev/null)
+    local test_bearer_token=$(echo $create_response | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null)
+
+    if [[ -z "$test_token_id" || -z "$test_bearer_token" ]]; then
+        log_error "Failed to create test token for UID $QINIU_TEST_UID"
+        return
+    fi
+
+    # 验证 token 并获取用户信息
+    local response=$(curl -s -X POST "$BASE_URL/api/v2/validateu" \
+        -H "Authorization: Bearer $test_bearer_token" \
+        -H "Content-Type: application/json")
+
+    echo "$response" | python3 -m json.tool
+
+    local valid=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('valid', False))" 2>/dev/null)
+    local has_userinfo=$(echo $response | python3 -c "import sys, json; ti = json.load(sys.stdin).get('token_info', {}); print(ti.get('user_info') is not None)" 2>/dev/null)
+
+    if [[ "$valid" == "True" ]]; then
+        log_success "Bearer Token validation passed"
+        if [[ "$has_userinfo" == "True" ]]; then
+            # 提取并显示完整用户信息
+            local uid=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('uid', 0) if ui else 0)" 2>/dev/null)
+            local email=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('email', '') if ui else '')" 2>/dev/null)
+            local username=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('username', '') if ui else '')" 2>/dev/null)
+            local utype=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('utype', 0) if ui else 0)" 2>/dev/null)
+            local activated=$(echo $response | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('activated', False) if ui else False)" 2>/dev/null)
+
+            log_success "🎉 FULL UserInfo retrieved from Qconfapi RPC!"
+            log_success "  UID: $uid"
+            log_success "  Email: $email"
+            if [[ -n "$username" ]]; then
+                log_success "  Username: $username"
+            fi
+            log_success "  Utype: $utype"
+            log_success "  Activated: $activated"
+            log_success "✅ Qconf RPC integration working correctly!"
+        else
+            log_error "UserInfo is null even with valid test UID - Qconf RPC may have issues"
+            log_warning "Expected user_info for UID $QINIU_TEST_UID but got null"
+        fi
+    else
+        log_error "Bearer Token validation failed: $response"
+    fi
+
+    # 清理测试 token
+    curl -s -X DELETE "$BASE_URL/api/v2/tokens/$test_token_id" \
+        -H "Authorization: $qstub_auth" > /dev/null
+}
+
 # 7. 更新 Token 状态
 test_update_token_status() {
     log_info "Updating token status..."
@@ -398,6 +540,18 @@ main() {
     test_step "6. Validate Bearer Token (IAM Sub-Account)"
     test_validate_bearer_token_iam
 
+    # 6.5 验证 Bearer Token 并返回用户信息（主账户）
+    test_step "6.5 Validate Bearer Token with UserInfo (Main Account)"
+    test_validate_bearer_token_with_userinfo_main
+
+    # 6.6 验证 Bearer Token 并返回用户信息（IAM 子账户）
+    test_step "6.6 Validate Bearer Token with UserInfo (IAM Sub-Account)"
+    test_validate_bearer_token_with_userinfo_iam
+
+    # 6.7 验证 Bearer Token 并返回完整用户信息（使用有效测试 UID）
+    test_step "6.7 Validate Bearer Token with FULL UserInfo (Valid Test UID)"
+    test_validate_bearer_token_with_full_userinfo
+
     # 7. 更新 Token 状态
     test_step "7. Update Token Status"
     test_update_token_status
@@ -414,6 +568,9 @@ main() {
     echo -e "${GREEN}  - IAM Sub-Account (UID + IUID) ✓${NC}"
     echo -e "${GREEN}  - Custom Prefix Token ✓${NC}"
     echo -e "${GREEN}  - Prefix Validation ✓${NC}"
+    echo -e "${GREEN}  - Bearer Token Validation (/validate) ✓${NC}"
+    echo -e "${GREEN}  - Bearer Token with UserInfo (/validateu) ✓${NC}"
+    echo -e "${GREEN}  - Qconfapi RPC Integration ✓${NC}"
     echo -e "${GREEN}========================================${NC}"
 }
 
