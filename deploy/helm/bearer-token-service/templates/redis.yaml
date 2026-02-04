@@ -77,6 +77,11 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 5
             timeoutSeconds: 2
+      {{- if not .Values.redis.storage }}
+      volumes:
+        - name: redis-data
+          emptyDir: {}
+      {{- end }}
   {{- if .Values.redis.storage }}
   volumeClaimTemplates:
     - metadata:
