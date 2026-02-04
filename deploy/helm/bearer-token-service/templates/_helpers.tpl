@@ -64,7 +64,7 @@ MongoDB connection URI
 */}}
 {{- define "bearer-token-service.mongoUri" -}}
 {{- if .Values.mongodb.enabled }}
-{{- printf "mongodb://%s:%s@mongodb:27017/%s?authSource=admin" .Values.mongodb.auth.username .Values.mongodb.auth.password .Values.mongodb.auth.database }}
+{{- printf "mongodb://%s:%v@mongodb:27017/%s?authSource=admin" (.Values.mongodb.auth.username | toString) (.Values.mongodb.auth.password | toString) (.Values.mongodb.auth.database | toString) }}
 {{- else }}
 {{- .Values.externalMongodb.uri }}
 {{- end }}

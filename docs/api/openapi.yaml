@@ -379,6 +379,80 @@ paths:
                     type: string
                     example: Token has expired
 
+  /api/v2/validateu:
+    post:
+      summary: 验证 Bearer Token（扩展用户信息）
+      description: |
+        验证 Token 的有效性，并返回扩展的用户信息（从 MySQL 查询）。
+
+        **与 /api/v2/validate 的区别**:
+        - 返回更丰富的用户信息（包括 Utype、Email、Username 等）
+        - 用户信息从 MySQL 数据库查询
+        - 如果 MySQL 查询失败，返回基本信息（user_info 为 null），Token 验证仍然成功
+
+        **优雅降级**:
+        当 MySQL 查询失败时，接口仍返回 200 状态码，但 user_info 字段为 null。这确保 Token 验证功能不会因外部数据库问题而受影响。
+      tags:
+        - Token 验证
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Token 验证成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenValidateUResponse'
+              examples:
+                success_with_userinfo:
+                  summary: 验证成功（包含用户信息）
+                  value:
+                    valid: true
+                    message: Token is valid
+                    token_info:
+                      token_id: tk_9z8y7x6w5v4u
+                      uid: "1369077332"
+                      iuid: "8901234"
+                      is_active: true
+                      expires_at: 2026-03-25T10:00:00Z
+                      user_info:
+                        uid: 1369077332
+                        email: user@example.com
+                        username: 测试用户
+                        utype: 268435460
+                        activated: true
+                        disabled_type: 0
+                        disabled_reason: ""
+                        parent_uid: 0
+                        created_at: 1609459200
+                        updated_at: 1704067200
+                        last_login_at: 1735689600
+                success_without_userinfo:
+                  summary: 验证成功（MySQL 查询失败，优雅降级）
+                  value:
+                    valid: true
+                    message: Token is valid
+                    token_info:
+                      token_id: tk_9z8y7x6w5v4u
+                      uid: "1369077332"
+                      iuid: "8901234"
+                      is_active: true
+                      expires_at: 2026-03-25T10:00:00Z
+                      user_info: null
+        '401':
+          description: Token 验证失败
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                    example: false
+                  message:
+                    type: string
+                    example: Token has expired
+
 components:
   securitySchemes:
     QstubAuth:
@@ -501,6 +575,135 @@ components:
           format: date-time
           description: 最后使用时间（null 表示从未使用）
           example: 2025-12-25T09:45:00Z
+
+    TokenValidateUResponse:
+      type: object
+      description: /api/v2/validateu 响应（包含扩展用户信息）
+      properties:
+        valid:
+          type: boolean
+          description: Token 是否有效
+          example: true
+        message:
+          type: string
+          description: 响应消息
+          example: Token is valid
+        token_info:
+          $ref: '#/components/schemas/TokenInfoU'
+
+    TokenInfoU:
+      type: object
+      description: Token 信息（包含扩展用户信息）
+      properties:
+        token_id:
+          type: string
+          example: tk_9z8y7x6w5v4u
+        account_id:
+          type: string
+          description: 账户 ID（HMAC 用户使用）
+          example: qiniu_1234567
+        uid:
+          type: string
+          description: 七牛 UID（从 account_id 提取）
+          example: "1369077332"
+        iuid:
+          type: string
+          description: IAM 用户ID
+          example: "8901234"
+        is_active:
+          type: boolean
+          example: true
+        expires_at:
+          type: string
+          format: date-time
+          description: 过期时间（null 表示永不过期）
+          example: 2026-03-25T10:00:00Z
+        last_used_at:
+          type: string
+          format: date-time
+          description: 最后使用时间
+          example: 2026-02-04T10:30:00Z
+        user_info:
+          $ref: '#/components/schemas/UserInfo'
+
+    UserInfo:
+      type: object
+      description: |
+        扩展用户信息（从 MySQL 查询）
+
+        **Utype 字段说明**:
+        Utype 是一个 32 位无符号整数，使用位掩码表示用户类型和状态。常用位包括：
+        - bit 0: 管理员
+        - bit 2: 企业用户
+        - bit 16: 缓冲期用户
+        - bit 28: 已禁用
+        - bit 29: 海外用户
+        - bit 30: 海外标准用户
+
+        **判断用户类型**:
+        使用位运算判断，例如：
+        - 是否被禁用: `(utype & (1 << 28)) != 0`
+        - 是否企业用户: `(utype & (1 << 2)) != 0`
+
+        **优雅降级**:
+        当 MySQL 查询失败时，此字段为 null。
+      nullable: true
+      properties:
+        uid:
+          type: integer
+          format: uint32
+          description: 七牛用户 ID
+          example: 1369077332
+        email:
+          type: string
+          description: 用户邮箱
+          example: user@example.com
+        username:
+          type: string
+          description: 用户显示名称
+          example: 测试用户
+        utype:
+          type: integer
+          format: uint32
+          description: 用户类型位掩码（见上方说明）
+          example: 268435460
+        activated:
+          type: boolean
+          description: 是否已激活
+          example: true
+        disabled_type:
+          type: integer
+          description: 冻结类型（0 表示未冻结）
+          example: 0
+        disabled_reason:
+          type: string
+          description: 冻结原因
+          example: ""
+        disabled_at:
+          type: string
+          format: date-time
+          description: 冻结时间
+          nullable: true
+        parent_uid:
+          type: integer
+          format: uint32
+          description: 父账户 UID（0 表示无父账户）
+          example: 0
+        created_at:
+          type: integer
+          format: int64
+          description: 创建时间（Unix 时间戳，秒）
+          example: 1609459200
+        updated_at:
+          type: integer
+          format: int64
+          description: 更新时间（Unix 时间戳，秒）
+          example: 1704067200
+        last_login_at:
+          type: integer
+          format: int64
+          description: 最后登录时间（Unix 时间戳，秒）
+          example: 1735689600
 
     Error:
       type: object
