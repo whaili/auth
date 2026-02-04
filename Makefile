@@ -57,8 +57,6 @@ help: ## 显示帮助信息
 	@echo "$(COLOR_SUCCESS)Helm 部署 (K8s):$(COLOR_RESET)"
 	@echo "  $(COLOR_INFO)helm-deploy-test$(COLOR_RESET)     部署到 K8s 测试环境"
 	@echo "  $(COLOR_INFO)helm-deploy-prod$(COLOR_RESET)     部署到 K8s 生产环境"
-	@echo "  $(COLOR_INFO)quick-upgrade-test$(COLOR_RESET)   快速升级测试环境（只更新镜像）"
-	@echo "  $(COLOR_INFO)quick-upgrade-prod$(COLOR_RESET)   快速升级生产环境（只更新镜像）"
 	@echo "  $(COLOR_INFO)helm-delete-test$(COLOR_RESET)     删除测试环境"
 	@echo "  $(COLOR_INFO)helm-delete-prod$(COLOR_RESET)     删除生产环境"
 	@echo "  $(COLOR_INFO)helm-status$(COLOR_RESET)          查看 Helm 发布状态"
@@ -201,12 +199,6 @@ helm-status: ## 查看 Helm 发布状态
 	@KUBECONFIG=$(KUBECONFIG_TEST) helm list -n $(HELM_NAMESPACE_TEST) 2>/dev/null | grep $(HELM_RELEASE) || echo "  $(COLOR_WARNING)无$(COLOR_RESET)"
 	@echo "$(COLOR_INFO)[生产环境]$(COLOR_RESET)"
 	@KUBECONFIG=$(KUBECONFIG_PROD) helm list -n $(HELM_NAMESPACE_PROD) 2>/dev/null | grep $(HELM_RELEASE) || echo "  $(COLOR_WARNING)无$(COLOR_RESET)"
-
-quick-upgrade-test: ## 快速升级测试环境（只更新镜像）
-	@bash scripts/quick-upgrade-test.sh $(TAG)
-
-quick-upgrade-prod: ## 快速升级生产环境（只更新镜像）
-	@bash scripts/quick-upgrade-prod.sh $(TAG)
 
 helm-status-test: ## 查看测试环境状态
 	@echo "$(COLOR_INFO)测试环境状态:$(COLOR_RESET)"
