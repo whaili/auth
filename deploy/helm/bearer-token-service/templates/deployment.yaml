@@ -62,6 +62,18 @@ spec:
               value: {{ .Values.externalRedis.password | quote }}
             {{- end }}
             {{- end }}
+            {{- if .Values.qconf.enabled }}
+            - name: QCONF_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bearer-token-service.fullname" . }}-secrets
+                  key: QCONF_ACCESS_KEY
+            - name: QCONF_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "bearer-token-service.fullname" . }}-secrets
+                  key: QCONF_SECRET_KEY
+            {{- end }}
           {{- with .Values.resources }}
           resources:
             {{- toYaml . | nindent 12 }}

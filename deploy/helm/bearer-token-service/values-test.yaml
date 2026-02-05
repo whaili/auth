@@ -23,7 +23,19 @@ ingress:
   className: ""
   annotations:
     kubernetes.io/ingress.class: nginx
-  host: bearer-token-test.qiniu.io
+  host: bearer-token-test.jfcs-k8s-qa1.qiniu.io
+
+# Qconf 配置（用于 /api/v2/validateu 获取用户信息）
+qconf:
+  enabled: true
+  accessKey: "-lnWyW53aRF1AYUj5D2oBBub377cTMYawZdOT25z"
+  secretKey: "FOXDmvIMttefUbUO8RWFIJ8JJdbPwvQGwoqZQL3O"
+  masterHosts: "http://kodo-dev.confg.jfcs-k8s-qa2.qiniu.io"
+  mcHosts: ""
+  lcacheExpiresMs: "3000"
+  lcacheDurationMs: "1000"
+  lcacheChanBufSize: "16000"
+  mcRWTimeoutMs: "100"
 
 # 测试环境配置
 config:
