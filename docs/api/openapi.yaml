@@ -383,15 +383,15 @@ paths:
     post:
       summary: 验证 Bearer Token（扩展用户信息）
       description: |
-        验证 Token 的有效性，并返回扩展的用户信息（从 MySQL 查询）。
+        验证 Token 的有效性，并返回扩展的用户信息（通过 Qconf RPC 查询）。
 
         **与 /api/v2/validate 的区别**:
         - 返回更丰富的用户信息（包括 Utype、Email、Username 等）
-        - 用户信息从 MySQL 数据库查询
-        - 如果 MySQL 查询失败，返回基本信息（user_info 为 null），Token 验证仍然成功
+        - 用户信息通过 Qconf RPC 远程调用查询
+        - 如果 Qconf RPC 查询失败，返回基本信息（user_info 为 null），Token 验证仍然成功
 
         **优雅降级**:
-        当 MySQL 查询失败时，接口仍返回 200 状态码，但 user_info 字段为 null。这确保 Token 验证功能不会因外部数据库问题而受影响。
+        当 Qconf RPC 查询失败时，接口仍返回 200 状态码，但 user_info 字段为 null。这确保 Token 验证功能不会因外部服务问题而受影响。
       tags:
         - Token 验证
       security:
@@ -428,7 +428,7 @@ paths:
                         updated_at: 1704067200
                         last_login_at: 1735689600
                 success_without_userinfo:
-                  summary: 验证成功（MySQL 查询失败，优雅降级）
+                  summary: 验证成功（Qconf RPC 查询失败，优雅降级）
                   value:
                     valid: true
                     message: Token is valid
@@ -629,7 +629,7 @@ components:
     UserInfo:
       type: object
       description: |
-        扩展用户信息（从 MySQL 查询）
+        扩展用户信息（通过 Qconf RPC 查询）
 
         **Utype 字段说明**:
         Utype 是一个 32 位无符号整数，使用位掩码表示用户类型和状态。常用位包括：
@@ -646,7 +646,7 @@ components:
         - 是否企业用户: `(utype & (1 << 2)) != 0`
 
         **优雅降级**:
-        当 MySQL 查询失败时，此字段为 null。
+        当 Qconf RPC 查询失败时，此字段为 null。
       nullable: true
       properties:
         uid:
