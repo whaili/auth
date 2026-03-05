@@ -19,7 +19,7 @@ COLOR_ERROR   = \033[31m
 PROJECT_NAME = bearer-token-service
 VERSION ?= latest
 IMAGE_REPO ?= aslan-spock-register.qiniu.io/miku-stream/bearer-token-service
-IMAGE_TAG  ?= v2.0.0
+IMAGE_TAG  ?= v2.1.0
 KUBECONFIG_TEST ?= _cust/kubeconfig-test
 GO = go
 HELM_CHART = deploy/helm/bearer-token-service
@@ -64,7 +64,7 @@ compile: ## 编译 Go 二进制文件
 	@mkdir -p bin
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build \
 		-ldflags="-w -s \
-		-X main.version=v2.1.0 \
+		-X main.version=$(IMAGE_TAG) \
 		-X main.gitCommit=$(shell git rev-parse --short HEAD) \
 		-X main.buildTime=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		-o bin/tokenserv cmd/server/main.go
