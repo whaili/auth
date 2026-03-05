@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -68,12 +69,17 @@ func RequestTrackingMiddleware(next http.Handler) http.Handler {
 
 // maskAuthorization 脱敏 Authorization 头
 // QiniuStub uid=1369077332&ut=1&iuid=... → 完整显示（不含敏感信息）
-// Bearer sk-abc123...                   → Bearer sk-abc1***（保留前10位）
+// Bearer sk-abc123...                   → Bearer sk-abc123**（保留前24位）
 func maskAuthorization(auth string) string {
 	if auth == "" {
 		return ""
 	}
-	const maxLen = 20
+	// QiniuStub 不含敏感信息，完整显示
+	if strings.HasPrefix(auth, "QiniuStub ") {
+		return auth
+	}
+	// Bearer token 脱敏：保留前24个字符
+	const maxLen = 24
 	if len(auth) <= maxLen {
 		return auth
 	}
