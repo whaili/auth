@@ -9,7 +9,7 @@ replicaCount: 4
 # 生产环境镜像仓库
 image:
   repository: registry-kubesphere-hd.qiniu.io/miku-stream/bearer-token-service
-  tag: "v2.0.0"
+  tag: "v2.1.0"
   pullPolicy: Always
 
 # 禁用内置 MongoDB（使用外部共用）
@@ -96,7 +96,7 @@ hpa:
 # 生产环境配置
 config:
   ginMode: "release"
-  logLevel: "info"
+  logLevel: "warn"
   mongoDatabase: "bearer_token_main"
   skipIndexCreation: "true"
   rateLimit:
