@@ -13,6 +13,7 @@ image:
 # 启用内置 MongoDB
 mongodb:
   enabled: true
+  image: aslan-spock-register.qiniu.io/miku-stream/mongo:7.0
   auth:
     username: admin
     password: changeme-testing
@@ -21,6 +22,7 @@ mongodb:
 # 启用内置 Redis
 redis:
   enabled: true
+  image: aslan-spock-register.qiniu.io/miku-stream/redis:7.2-alpine
 
 # 启用 Ingress
 ingress:
