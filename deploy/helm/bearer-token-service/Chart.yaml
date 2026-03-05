@@ -2,8 +2,8 @@ apiVersion: v2
 name: bearer-token-service
 description: A Helm chart for Bearer Token Service V2 - Multi-tenant Token Authentication Service
 type: application
-version: 2.0.0
-appVersion: "v2.0.0"
+version: 2.1.0
+appVersion: "v2.1.0"
 
 keywords:
   - authentication

@@ -62,7 +62,12 @@ help: ## 显示帮助信息
 compile: ## 编译 Go 二进制文件
 	@echo "$(COLOR_INFO)编译服务...$(COLOR_RESET)"
 	@mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -ldflags='-w -s' -o bin/tokenserv cmd/server/main.go
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build \
+		-ldflags="-w -s \
+		-X main.version=v2.1.0 \
+		-X main.gitCommit=$(shell git rev-parse --short HEAD) \
+		-X main.buildTime=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		-o bin/tokenserv cmd/server/main.go
 	@echo "$(COLOR_SUCCESS)编译完成: bin/tokenserv$(COLOR_RESET)"
 	@ls -lh bin/tokenserv
 

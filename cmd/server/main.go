@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -24,7 +25,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// 版本信息，通过 ldflags 注入
+var (
+	version   = "dev"
+	gitCommit = "unknown"
+	buildTime = "unknown"
+)
+
 func main() {
+	// --version 参数
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Printf("bearer-token-service %s (commit: %s, built: %s)\n", version, gitCommit, buildTime)
+		os.Exit(0)
+	}
 	// ========================================
 	// 0. 初始化日志系统
 	// ========================================
@@ -328,8 +341,9 @@ func main() {
 
 	// 健康检查
 	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok"}`))
+		fmt.Fprintf(w, `{"status":"ok","version":"%s","commit":"%s","built":"%s"}`, version, gitCommit, buildTime)
 	}).Methods("GET")
 
 	// Prometheus metrics 端点

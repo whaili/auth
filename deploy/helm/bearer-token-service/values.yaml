@@ -124,7 +124,7 @@ qconf:
 config:
   port: "8080"
   ginMode: "release"
-  logLevel: "info"
+  logLevel: "warn"
   logFormat: "json"
   mongoDatabase: "token_service_v2"
   qiniuUidMapperMode: "simple"
