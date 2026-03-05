@@ -42,6 +42,7 @@ func RequestTrackingMiddleware(next http.Handler) http.Handler {
 			slog.String("path", r.URL.Path),
 			slog.String("remote_addr", r.RemoteAddr),
 			slog.String("user_agent", r.UserAgent()),
+			slog.String("authorization", maskAuthorization(r.Header.Get("Authorization"))),
 		)
 
 		next.ServeHTTP(wrapped, r)
@@ -63,6 +64,20 @@ func RequestTrackingMiddleware(next http.Handler) http.Handler {
 			slog.Float64("duration_ms", float64(duration.Microseconds())/1000),
 		)
 	})
+}
+
+// maskAuthorization 脱敏 Authorization 头
+// QiniuStub uid=1369077332&ut=1&iuid=... → 完整显示（不含敏感信息）
+// Bearer sk-abc123...                   → Bearer sk-abc1***（保留前10位）
+func maskAuthorization(auth string) string {
+	if auth == "" {
+		return ""
+	}
+	const maxLen = 20
+	if len(auth) <= maxLen {
+		return auth
+	}
+	return auth[:maxLen] + "***"
 }
 
 // generateRequestID 生成请求 ID
