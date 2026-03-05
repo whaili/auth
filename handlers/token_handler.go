@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/qiniu/bearer-token-service/v2/auth"
 	"github.com/qiniu/bearer-token-service/v2/interfaces"
@@ -13,6 +14,18 @@ import (
 
 // prefixRegex 校验 prefix：只允许小写字母、数字、下划线
 var prefixRegex = regexp.MustCompile(`^[a-z0-9_]+$`)
+
+// tokenErrStatus 将 service 层错误映射为 HTTP 状态码
+func tokenErrStatus(err error) int {
+	msg := err.Error()
+	if strings.Contains(msg, "permission denied") {
+		return http.StatusForbidden
+	}
+	if strings.Contains(msg, "not found") {
+		return http.StatusNotFound
+	}
+	return http.StatusInternalServerError
+}
 
 // TokenHandlerImpl Token 管理 Handler 实现
 type TokenHandlerImpl struct {
@@ -103,7 +116,7 @@ func (h *TokenHandlerImpl) GetTokenInfo(w http.ResponseWriter, r *http.Request) 
 
 	token, err := h.tokenService.GetTokenInfo(r.Context(), accountID, tokenID)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		respondError(w, tokenErrStatus(err), err.Error())
 		return
 	}
 
@@ -130,7 +143,7 @@ func (h *TokenHandlerImpl) UpdateTokenStatus(w http.ResponseWriter, r *http.Requ
 
 	err = h.tokenService.UpdateTokenStatus(r.Context(), accountID, tokenID, req.IsActive)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondError(w, tokenErrStatus(err), err.Error())
 		return
 	}
 
@@ -153,7 +166,7 @@ func (h *TokenHandlerImpl) DeleteToken(w http.ResponseWriter, r *http.Request) {
 
 	err = h.tokenService.DeleteToken(r.Context(), accountID, tokenID)
 	if err != nil {
-		respondError(w, http.StatusInternalServerError, err.Error())
+		respondError(w, tokenErrStatus(err), err.Error())
 		return
 	}
 
@@ -176,7 +189,7 @@ func (h *TokenHandlerImpl) GetTokenStats(w http.ResponseWriter, r *http.Request)
 
 	stats, err := h.tokenService.GetTokenStats(r.Context(), accountID, tokenID)
 	if err != nil {
-		respondError(w, http.StatusNotFound, err.Error())
+		respondError(w, tokenErrStatus(err), err.Error())
 		return
 	}
 

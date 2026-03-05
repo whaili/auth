@@ -141,7 +141,8 @@ func (r *MongoTokenRepository) GetByTokenValue(ctx context.Context, tokenValue s
 }
 
 // ListByAccountID 查询账户的所有 Tokens（租户隔离）
-func (r *MongoTokenRepository) ListByAccountID(ctx context.Context, accountID string, activeOnly bool, limit, offset int) ([]interfaces.Token, error) {
+// iuid/iamAlias 非空时只返回该子账号创建的 token
+func (r *MongoTokenRepository) ListByAccountID(ctx context.Context, accountID string, activeOnly bool, limit, offset int, iuid, iamAlias string) ([]interfaces.Token, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -156,6 +157,13 @@ func (r *MongoTokenRepository) ListByAccountID(ctx context.Context, accountID st
 
 	if activeOnly {
 		filter["is_active"] = true
+	}
+
+	// 子账号隔离：iuid 或 iamAlias 非空时只返回对应子账号的 token
+	if iuid != "" {
+		filter["iuid"] = iuid
+	} else if iamAlias != "" {
+		filter["iam_alias"] = iamAlias
 	}
 
 	opts := options.Find().
@@ -178,13 +186,21 @@ func (r *MongoTokenRepository) ListByAccountID(ctx context.Context, accountID st
 }
 
 // CountByAccountID 统计账户的 Token 数量
-func (r *MongoTokenRepository) CountByAccountID(ctx context.Context, accountID string, activeOnly bool) (int64, error) {
+// iuid/iamAlias 非空时只统计该子账号创建的 token
+func (r *MongoTokenRepository) CountByAccountID(ctx context.Context, accountID string, activeOnly bool, iuid, iamAlias string) (int64, error) {
 	filter := bson.M{
 		"account_id": accountID, // 租户隔离
 	}
 
 	if activeOnly {
 		filter["is_active"] = true
+	}
+
+	// 子账号隔离
+	if iuid != "" {
+		filter["iuid"] = iuid
+	} else if iamAlias != "" {
+		filter["iam_alias"] = iamAlias
 	}
 
 	return r.collection.CountDocuments(ctx, filter)

@@ -48,10 +48,12 @@ type TokenRepository interface {
 	GetByTokenValue(ctx context.Context, tokenValue string) (*Token, error)
 
 	// ListByAccountID 查询账户的所有 Tokens（租户隔离）
-	ListByAccountID(ctx context.Context, accountID string, activeOnly bool, limit, offset int) ([]Token, error)
+	// iuid/iamAlias 非空时只返回该子账号创建的 token
+	ListByAccountID(ctx context.Context, accountID string, activeOnly bool, limit, offset int, iuid, iamAlias string) ([]Token, error)
 
 	// CountByAccountID 统计账户的 Token 数量
-	CountByAccountID(ctx context.Context, accountID string, activeOnly bool) (int64, error)
+	// iuid/iamAlias 非空时只统计该子账号创建的 token
+	CountByAccountID(ctx context.Context, accountID string, activeOnly bool, iuid, iamAlias string) (int64, error)
 
 	// UpdateStatus 更新 Token 状态
 	UpdateStatus(ctx context.Context, tokenID string, isActive bool) error
@@ -84,7 +86,7 @@ type AuditLogRepository interface {
 	DeleteOldLogs(ctx context.Context, olderThan time.Time) (int64, error)
 }
 
-// UserInfoRepository 用户信息数据访问接口（MySQL）
+// UserInfoRepository 用户信息数据访问接口（支持 qconfapi RPC 或 MySQL）
 type UserInfoRepository interface {
 	// GetUserInfoByUID 根据 UID 查询用户信息
 	GetUserInfoByUID(ctx context.Context, uid uint32) (*UserInfo, error)

@@ -27,7 +27,8 @@ type Token struct {
 	Token       string     `bson:"token" json:"token"`                   // 实际的 token 值
 	Description string     `bson:"description" json:"description"`       // Token 描述
 	RateLimit   *RateLimit `bson:"rate_limit,omitempty" json:"rate_limit,omitempty"`
-	IUID        string     `bson:"iuid,omitempty" json:"iuid,omitempty"` // IAM 用户ID（从 QiniuStub 认证中提取）
+	IUID        string     `bson:"iuid,omitempty" json:"iuid,omitempty"`           // IAM 用户ID（从 QiniuStub 认证中提取）
+	IamAlias    string     `bson:"iam_alias,omitempty" json:"iam_alias,omitempty"` // IAM 子账号名（从 QiniuStub 认证中提取）
 	CreatedAt   time.Time  `bson:"created_at" json:"created_at"`
 	ExpiresAt   *time.Time `bson:"expires_at,omitempty" json:"expires_at,omitempty"` // nil 表示永不过期
 	IsActive    bool       `bson:"is_active" json:"is_active"`
@@ -151,6 +152,7 @@ type TokenInfo struct {
 	AccountID  string     `json:"account_id,omitempty"`  // HMAC 用户使用
 	UID        string     `json:"uid,omitempty"`         // QiniuStub 用户使用（从 account_id 提取）
 	IUID       string     `json:"iuid,omitempty"`        // IAM 用户ID（当请求中包含 iuid 时返回，用于标识IAM用户）
+	IamAlias   string     `json:"iam_alias,omitempty"`   // IAM 子账号名
 	IsActive   bool       `json:"is_active"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`  // nil 表示永不过期
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"` // nil 表示从未使用
@@ -175,9 +177,10 @@ type DailyStat struct {
 // /api/v2/validateu 扩展模型
 // ========================================
 
-// UserInfo 扩展用户信息（从 MySQL 查询）
+// UserInfo 扩展用户信息（从 qconfapi RPC 或 MySQL 查询）
 type UserInfo struct {
 	UID            uint32    `json:"uid"`
+	IUID           uint32    `json:"iuid,omitempty"`            // IAM 子账号 UID（仅子账号时有值）
 	Email          string    `json:"email"`
 	Username       string    `json:"username"`                  // 显示名称
 	Utype          uint32    `json:"utype"`                     // 用户类型位掩码
@@ -229,6 +232,7 @@ type TokenInfoU struct {
 	AccountID  string     `json:"account_id,omitempty"`  // HMAC 用户使用
 	UID        string     `json:"uid,omitempty"`         // QiniuStub 用户使用（从 account_id 提取）
 	IUID       string     `json:"iuid,omitempty"`        // IAM 用户ID
+	IamAlias   string     `json:"iam_alias,omitempty"`   // IAM 子账号名
 	IsActive   bool       `json:"is_active"`
 	ExpiresAt  *time.Time `json:"expires_at,omitempty"`  // nil 表示永不过期
 	LastUsedAt *time.Time `json:"last_used_at,omitempty"` // nil 表示从未使用

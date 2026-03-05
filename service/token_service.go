@@ -33,21 +33,23 @@ func (s *TokenServiceImpl) CreateToken(ctx context.Context, accountID string, re
 		expiresAt = &t
 	}
 
-	// 2. 从 Context 中提取 IUID（如果是 QiniuStub 认证）
-	var iuid string
+	// 2. 从 Context 中提取 IUID 和 IamAlias（如果是 QiniuStub 认证）
+	var iuid, iamAlias string
 	if qstubUser, ok := ctx.Value("qstub_user").(*auth.QstubUserInfo); ok {
 		iuid = qstubUser.IamUid
+		iamAlias = qstubUser.IamAlias
 	}
 
 	// 3. 创建 Token 对象
 	token := &interfaces.Token{
-		AccountID:   accountID, // 关联到账户（租户隔离）
+		AccountID:   accountID,
 		Description: req.Description,
 		RateLimit:   req.RateLimit,
-		IUID:        iuid,      // 保存 IUID（如果存在）
+		IUID:        iuid,
+		IamAlias:    iamAlias,
 		ExpiresAt:   expiresAt,
 		IsActive:    true,
-		Prefix:      req.Prefix, // 自定义前缀
+		Prefix:      req.Prefix,
 	}
 
 	// Token 值由 Repository 自动生成
@@ -77,14 +79,21 @@ func (s *TokenServiceImpl) CreateToken(ctx context.Context, accountID string, re
 
 // ListTokens 列出账户的所有 Tokens
 func (s *TokenServiceImpl) ListTokens(ctx context.Context, accountID string, activeOnly bool, limit, offset int) (*interfaces.TokenListResponse, error) {
-	// 查询 Tokens（自动租户隔离）
-	tokens, err := s.tokenRepo.ListByAccountID(ctx, accountID, activeOnly, limit, offset)
+	// 从 Context 中提取子账号信息（子账号隔离）
+	var iuid, iamAlias string
+	if qstubUser, ok := ctx.Value("qstub_user").(*auth.QstubUserInfo); ok {
+		iuid = qstubUser.IamUid
+		iamAlias = qstubUser.IamAlias
+	}
+
+	// 查询 Tokens（自动租户隔离 + 子账号隔离）
+	tokens, err := s.tokenRepo.ListByAccountID(ctx, accountID, activeOnly, limit, offset, iuid, iamAlias)
 	if err != nil {
 		return nil, err
 	}
 
 	// 统计总数
-	total, err := s.tokenRepo.CountByAccountID(ctx, accountID, activeOnly)
+	total, err := s.tokenRepo.CountByAccountID(ctx, accountID, activeOnly, iuid, iamAlias)
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +131,27 @@ func (s *TokenServiceImpl) ListTokens(ctx context.Context, accountID string, act
 	}, nil
 }
 
+// checkOwnership 验证 token 归属：主账号 + 子账号双层隔离
+// 主账号（无 iuid/iam_alias）可操作该账号下所有 token
+// iuid 子账号只能操作自己创建的 token（token.IUID == requester iuid）
+// iam_alias 子账号只能操作自己创建的 token（token.IamAlias == requester iam_alias）
+func checkOwnership(ctx context.Context, token *interfaces.Token, accountID string) error {
+	if token.AccountID != accountID {
+		return errors.New("permission denied")
+	}
+	qstubUser, ok := ctx.Value("qstub_user").(*auth.QstubUserInfo)
+	if !ok || qstubUser == nil {
+		return nil // 非 QiniuStub 请求，主账号校验已通过
+	}
+	if qstubUser.IamUid != "" && token.IUID != qstubUser.IamUid {
+		return errors.New("permission denied")
+	}
+	if qstubUser.IamUid == "" && qstubUser.IamAlias != "" && token.IamAlias != qstubUser.IamAlias {
+		return errors.New("permission denied")
+	}
+	return nil
+}
+
 // GetTokenInfo 获取 Token 详情
 func (s *TokenServiceImpl) GetTokenInfo(ctx context.Context, accountID string, tokenID string) (*interfaces.Token, error) {
 	token, err := s.tokenRepo.GetByID(ctx, tokenID)
@@ -133,9 +163,8 @@ func (s *TokenServiceImpl) GetTokenInfo(ctx context.Context, accountID string, t
 		return nil, errors.New("token not found")
 	}
 
-	// 验证 Token 归属（租户隔离）
-	if token.AccountID != accountID {
-		return nil, errors.New("permission denied: token does not belong to this account")
+	if err := checkOwnership(ctx, token, accountID); err != nil {
+		return nil, err
 	}
 
 	// 隐藏完整 Token
@@ -146,7 +175,6 @@ func (s *TokenServiceImpl) GetTokenInfo(ctx context.Context, accountID string, t
 
 // UpdateTokenStatus 更新 Token 状态
 func (s *TokenServiceImpl) UpdateTokenStatus(ctx context.Context, accountID string, tokenID string, isActive bool) error {
-	// 验证归属
 	token, err := s.tokenRepo.GetByID(ctx, tokenID)
 	if err != nil {
 		return err
@@ -154,8 +182,9 @@ func (s *TokenServiceImpl) UpdateTokenStatus(ctx context.Context, accountID stri
 	if token == nil {
 		return errors.New("token not found")
 	}
-	if token.AccountID != accountID {
-		return errors.New("permission denied")
+	if err := checkOwnership(ctx, token, accountID); err != nil {
+		s.logAction(ctx, accountID, interfaces.AuditActionUpdateToken, tokenID, interfaces.AuditResultFailure, err.Error(), nil)
+		return err
 	}
 
 	// 更新状态
@@ -174,7 +203,6 @@ func (s *TokenServiceImpl) UpdateTokenStatus(ctx context.Context, accountID stri
 
 // DeleteToken 删除 Token
 func (s *TokenServiceImpl) DeleteToken(ctx context.Context, accountID string, tokenID string) error {
-	// 验证归属
 	token, err := s.tokenRepo.GetByID(ctx, tokenID)
 	if err != nil {
 		return err
@@ -182,8 +210,9 @@ func (s *TokenServiceImpl) DeleteToken(ctx context.Context, accountID string, to
 	if token == nil {
 		return errors.New("token not found")
 	}
-	if token.AccountID != accountID {
-		return errors.New("permission denied")
+	if err := checkOwnership(ctx, token, accountID); err != nil {
+		s.logAction(ctx, accountID, interfaces.AuditActionDeleteToken, tokenID, interfaces.AuditResultFailure, err.Error(), nil)
+		return err
 	}
 
 	// 删除
@@ -207,8 +236,8 @@ func (s *TokenServiceImpl) GetTokenStats(ctx context.Context, accountID string, 
 	if token == nil {
 		return nil, errors.New("token not found")
 	}
-	if token.AccountID != accountID {
-		return nil, errors.New("permission denied")
+	if err := checkOwnership(ctx, token, accountID); err != nil {
+		return nil, err
 	}
 
 	resp := &interfaces.TokenStatsResponse{

@@ -31,10 +31,11 @@ type QstubUserInfo struct {
 	UID     string `json:"uid"`             // 必需: 用户ID (主账户)
 	Utype   uint32 `json:"ut"`              // 可选: 用户类型
 	Appid   uint64 `json:"app,omitempty"`   // 可选: 应用ID(未使用)
-	IamUid  string `json:"iuid,omitempty"`  // 可选: IAM 用户ID (子账户)
-	Access  string `json:"ak,omitempty"`    // 可选: AccessKey(未使用)
-	EndUser string `json:"eu,omitempty"`    // 可选: 最终用户(未使用)
-	Email   string `json:"email,omitempty"` // 可选: 邮箱
+	IamUid    string `json:"iuid,omitempty"`      // 可选: IAM 用户ID (子账户)
+	IamAlias  string `json:"iam_alias,omitempty"` // 可选: IAM 子账户名 (app 字段忽略)
+	Access    string `json:"ak,omitempty"`        // 可选: AccessKey(未使用)
+	EndUser   string `json:"eu,omitempty"`        // 可选: 最终用户(未使用)
+	Email     string `json:"email,omitempty"`     // 可选: 邮箱
 }
 
 // AccountInfo 简化的账户信息
@@ -55,9 +56,10 @@ func NewQstubAuthMiddleware(qiniuUIDMapper QiniuUIDMapper) *QstubAuthMiddleware 
 // 认证方式：
 // Authorization 头必须以 "QiniuStub " 开头，格式为 URL 参数格式
 //
-// 支持两种格式：
+// 支持三种格式：
 // 1. 主账户格式: QiniuStub uid=12345&ut=1
-// 2. IAM 子账户格式: QiniuStub uid=12345&ut=1&iuid=8901234
+// 2. IAM 子账户格式（iuid）: QiniuStub uid=12345&ut=1&iuid=8901234
+// 3. IAM 子账户格式（iam_alias）: QiniuStub uid=12345&ut=1&app=1&iam_alias=myuser （app 忽略）
 func (m *QstubAuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		authHeader := r.Header.Get("Authorization")
@@ -124,6 +126,7 @@ func (m *QstubAuthMiddleware) parseQstubToken(authHeader string) (*QstubUserInfo
 
 // parseQstubURLParams 解析 URL 参数格式的 QiniuStub Token
 // 例如: "QiniuStub uid=12345&ut=1&iuid=8901234"
+//      "QiniuStub uid=12345&ut=1&app=1&iam_alias=myuser"
 func (m *QstubAuthMiddleware) parseQstubURLParams(authHeader string) (*QstubUserInfo, error) {
 	// 移除 "QiniuStub " 前缀
 	params := strings.TrimPrefix(authHeader, "QiniuStub ")
@@ -157,6 +160,8 @@ func (m *QstubAuthMiddleware) parseQstubURLParams(authHeader string) (*QstubUser
 			}
 		case "iuid":
 			userInfo.IamUid = value
+		case "iam_alias":
+			userInfo.IamAlias = value
 		case "ak":
 			userInfo.Access = value
 		case "eu":

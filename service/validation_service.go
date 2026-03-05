@@ -106,9 +106,10 @@ func (s *ValidationServiceImpl) ValidateToken(ctx context.Context, req *interfac
 
 	// 根据 account_id 格式判断用户类型
 	if uid, isQiniuStub := extractUIDFromAccountID(token.AccountID); isQiniuStub {
-		// QiniuStub 用户：返回 UID 和 IUID（如果存在）
+		// QiniuStub 用户：返回 UID、IUID、IamAlias（如果存在）
 		tokenInfo.UID = uid
-		tokenInfo.IUID = token.IUID // 从 Token 中读取 IUID
+		tokenInfo.IUID = token.IUID
+		tokenInfo.IamAlias = token.IamAlias
 	} else {
 		// HMAC 用户：返回 AccountID
 		tokenInfo.AccountID = token.AccountID
@@ -163,6 +164,7 @@ func (s *ValidationServiceImpl) ValidateTokenWithUserInfo(ctx context.Context, r
 		AccountID:  basicResponse.TokenInfo.AccountID,
 		UID:        basicResponse.TokenInfo.UID,
 		IUID:       basicResponse.TokenInfo.IUID,
+		IamAlias:   basicResponse.TokenInfo.IamAlias,
 		IsActive:   basicResponse.TokenInfo.IsActive,
 		ExpiresAt:  basicResponse.TokenInfo.ExpiresAt,
 		LastUsedAt: basicResponse.TokenInfo.LastUsedAt,
@@ -181,16 +183,23 @@ func (s *ValidationServiceImpl) ValidateTokenWithUserInfo(ctx context.Context, r
 		} else {
 			uid := uint32(uidInt)
 
-			// 查询 MySQL 用户信息
+			// 查询用户信息（qconfapi RPC 或 MySQL，取决于配置）
 			userInfo, err := s.userInfoRepo.GetUserInfoByUID(ctx, uid)
 			if err != nil {
-				// MySQL 查询失败，记录日志但继续返回基本信息（优雅降级）
-				observability.LogError(ctx, "Failed to query user info from MySQL", err,
+				// 查询失败，记录日志但继续返回基本信息（优雅降级）
+				observability.LogError(ctx, "Failed to query user info", err,
 					slog.Uint64("uid", uint64(uid)),
 					slog.String("token_id", tokenInfoU.TokenID))
 				// user_info 保持 nil
 			} else {
 				// 成功获取用户信息
+				// 如果是 IAM 子账号，将 IUID 写入 user_info
+				if tokenInfoU.IUID != "" {
+					iuidInt, parseErr := strconv.ParseUint(tokenInfoU.IUID, 10, 32)
+					if parseErr == nil {
+						userInfo.IUID = uint32(iuidInt)
+					}
+				}
 				tokenInfoU.UserInfo = userInfo
 				observability.LogDebug(ctx, "User info retrieved successfully",
 					slog.Uint64("uid", uint64(uid)),

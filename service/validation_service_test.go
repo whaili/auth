@@ -42,11 +42,11 @@ func (m *MockTokenRepository) GetByID(ctx context.Context, tokenID string) (*int
 	return nil, nil
 }
 
-func (m *MockTokenRepository) ListByAccountID(ctx context.Context, accountID string, activeOnly bool, limit, offset int) ([]interfaces.Token, error) {
+func (m *MockTokenRepository) ListByAccountID(ctx context.Context, accountID string, activeOnly bool, limit, offset int, iuid, iamAlias string) ([]interfaces.Token, error) {
 	return nil, nil
 }
 
-func (m *MockTokenRepository) CountByAccountID(ctx context.Context, accountID string, activeOnly bool) (int64, error) {
+func (m *MockTokenRepository) CountByAccountID(ctx context.Context, accountID string, activeOnly bool, iuid, iamAlias string) (int64, error) {
 	return 0, nil
 }
 

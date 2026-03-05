@@ -65,9 +65,15 @@ curl -X POST "http://localhost:8080/api/v2/tokens" \
   -H "Content-Type: application/json" \
   -d '{"description": "My token", "expires_in_seconds": 3600}'
 
-# IAM 子账户
+# IAM 子账户（iuid 方式）
 curl -X POST "http://localhost:8080/api/v2/tokens" \
   -H "Authorization: QiniuStub uid=1369077332&ut=1&iuid=8901234" \
+  -H "Content-Type: application/json" \
+  -d '{"description": "IAM token", "expires_in_seconds": 3600}'
+
+# IAM 子账户（iam_alias 方式，app 字段忽略）
+curl -X POST "http://localhost:8080/api/v2/tokens" \
+  -H "Authorization: QiniuStub uid=1369077332&ut=1&app=1&iam_alias=myuser" \
   -H "Content-Type: application/json" \
   -d '{"description": "IAM token", "expires_in_seconds": 3600}'
 ```

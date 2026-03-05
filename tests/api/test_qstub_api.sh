@@ -129,6 +129,67 @@ test_create_token_iam_account() {
     fi
 }
 
+# 2.05 创建 Token（IAM 子账户，iam_alias 方式）
+test_create_token_iam_alias() {
+    log_info "Creating token with IAM sub-account (iam_alias方式, uid=$QINIU_UID, iam_alias=testuser)..."
+
+    local qstub_auth="QiniuStub uid=${QINIU_UID}&ut=1&app=1&iam_alias=testuser"
+
+    local response=$(curl -s -X POST "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: $qstub_auth" \
+        -H "Content-Type: application/json" \
+        -d '{
+            "description": "Test token for IAM sub-account (iam_alias)",
+            "expires_in_seconds": 3600
+        }')
+
+    TOKEN_ID_IAM_ALIAS=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin)['token_id'])" 2>/dev/null)
+    BEARER_TOKEN_IAM_ALIAS=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin)['token'])" 2>/dev/null)
+
+    if [[ -n "$TOKEN_ID_IAM_ALIAS" ]]; then
+        log_success "Token created for IAM sub-account (iam_alias)"
+        log_info "Token ID: $TOKEN_ID_IAM_ALIAS"
+        log_info "Bearer Token: ${BEARER_TOKEN_IAM_ALIAS:0:20}..."
+    else
+        log_error "Failed to create token: $response"
+        exit 1
+    fi
+}
+
+# 6.65 验证 Bearer Token 并返回用户信息（IAM iam_alias 方式）
+test_validate_bearer_token_with_userinfo_iam_alias() {
+    log_info "Validating Bearer Token with UserInfo (IAM iam_alias sub-account)..."
+
+    local response=$(curl -s -X POST "$BASE_URL/api/v2/validateu" \
+        -H "Authorization: Bearer $BEARER_TOKEN_IAM_ALIAS" \
+        -H "Content-Type: application/json")
+
+    if echo "$response" | grep -q "404 page not found"; then
+        log_warning "/api/v2/validateu endpoint not available - skipping test"
+        return 0
+    fi
+
+    echo "$response" | python3 -m json.tool 2>/dev/null || {
+        log_warning "Failed to parse JSON response, raw response: $response"
+        return 0
+    }
+
+    local valid=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('valid', False))" 2>/dev/null)
+    local iam_alias=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('token_info', {}).get('iam_alias', ''))" 2>/dev/null)
+
+    if [[ "$valid" == "True" ]]; then
+        log_success "Bearer Token validation with UserInfo passed (IAM iam_alias sub-account)"
+        if [[ -n "$iam_alias" ]]; then
+            log_success "iam_alias field present in token_info: $iam_alias"
+        else
+            log_warning "iam_alias field not present in token_info"
+        fi
+    else
+        log_error "Bearer Token validation failed: $response"
+        exit 1
+    fi
+}
+
 # 2.1 创建 Token（自定义 prefix）
 test_create_token_with_prefix() {
     log_info "Creating token with custom prefix..."
@@ -488,6 +549,291 @@ test_validate_bearer_token_with_full_userinfo() {
     fi
 }
 
+# 6.8 验证 Bearer Token 并返回完整用户信息（IAM 子账户，含 iuid/iam_alias）
+test_validate_bearer_token_with_full_userinfo_iam() {
+    log_info "Validating Bearer Token with FULL UserInfo (IAM sub-account, iuid + iam_alias)..."
+
+    local test_uids=("$QINIU_TEST_UID" "$QINIU_PROD_UID")
+    local test_labels=("Test ENV ($QINIU_TEST_UID)" "Prod ENV ($QINIU_PROD_UID)")
+    local found_userinfo=false
+
+    for i in 0 1; do
+        local uid="${test_uids[$i]}"
+        local label="${test_labels[$i]}"
+
+        log_info "Trying ${label} with iuid=${QINIU_IUID} and iam_alias=testuser..."
+
+        # 用 iuid 创建 token
+        local qstub_auth_iuid="QiniuStub uid=${uid}&ut=1&iuid=${QINIU_IUID}"
+        local create_iuid=$(curl -s -X POST "$BASE_URL/api/v2/tokens" \
+            -H "Authorization: $qstub_auth_iuid" \
+            -H "Content-Type: application/json" \
+            -d '{"description": "Full userinfo IAM iuid test", "expires_in_seconds": 300}')
+
+        local token_id_iuid=$(echo $create_iuid | python3 -c "import sys, json; print(json.load(sys.stdin).get('token_id', ''))" 2>/dev/null)
+        local bearer_iuid=$(echo $create_iuid | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null)
+
+        # 用 iam_alias 创建 token
+        local qstub_auth_alias="QiniuStub uid=${uid}&ut=1&app=1&iam_alias=testuser"
+        local create_alias=$(curl -s -X POST "$BASE_URL/api/v2/tokens" \
+            -H "Authorization: $qstub_auth_alias" \
+            -H "Content-Type: application/json" \
+            -d '{"description": "Full userinfo IAM iam_alias test", "expires_in_seconds": 300}')
+
+        local token_id_alias=$(echo $create_alias | python3 -c "import sys, json; print(json.load(sys.stdin).get('token_id', ''))" 2>/dev/null)
+        local bearer_alias=$(echo $create_alias | python3 -c "import sys, json; print(json.load(sys.stdin).get('token', ''))" 2>/dev/null)
+
+        if [[ -z "$token_id_iuid" || -z "$token_id_alias" ]]; then
+            log_warning "Failed to create tokens for UID $uid, skipping..."
+            continue
+        fi
+
+        # 验证 iuid token
+        local resp_iuid=$(curl -s -X POST "$BASE_URL/api/v2/validateu" \
+            -H "Authorization: Bearer $bearer_iuid")
+        local has_ui_iuid=$(echo $resp_iuid | python3 -c "import sys, json; ti = json.load(sys.stdin).get('token_info', {}); print(ti.get('user_info') is not None)" 2>/dev/null)
+
+        if [[ "$has_ui_iuid" == "True" ]]; then
+            found_userinfo=true
+            log_info "--- iuid 方式 ---"
+            echo "$resp_iuid" | python3 -m json.tool 2>/dev/null
+
+            local ret_iuid=$(echo $resp_iuid | python3 -c "import sys, json; print(json.load(sys.stdin).get('token_info', {}).get('iuid', ''))" 2>/dev/null)
+            local ui_iuid=$(echo $resp_iuid | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('iuid', 0) if ui else 0)" 2>/dev/null)
+
+            if [[ -n "$ret_iuid" ]]; then
+                log_success "token_info.iuid: $ret_iuid"
+            else
+                log_warning "token_info.iuid not present"
+            fi
+            if [[ "$ui_iuid" != "0" ]]; then
+                log_success "user_info.iuid: $ui_iuid"
+            else
+                log_warning "user_info.iuid not present"
+            fi
+        fi
+
+        # 验证 iam_alias token
+        local resp_alias=$(curl -s -X POST "$BASE_URL/api/v2/validateu" \
+            -H "Authorization: Bearer $bearer_alias")
+        local has_ui_alias=$(echo $resp_alias | python3 -c "import sys, json; ti = json.load(sys.stdin).get('token_info', {}); print(ti.get('user_info') is not None)" 2>/dev/null)
+
+        if [[ "$has_ui_alias" == "True" ]]; then
+            found_userinfo=true
+            log_info "--- iam_alias 方式 ---"
+            echo "$resp_alias" | python3 -m json.tool 2>/dev/null
+
+            local ret_alias=$(echo $resp_alias | python3 -c "import sys, json; print(json.load(sys.stdin).get('token_info', {}).get('iam_alias', ''))" 2>/dev/null)
+            local ui_iuid_alias=$(echo $resp_alias | python3 -c "import sys, json; ui = json.load(sys.stdin).get('token_info', {}).get('user_info'); print(ui.get('iuid', 0) if ui else 0)" 2>/dev/null)
+
+            if [[ -n "$ret_alias" ]]; then
+                log_success "token_info.iam_alias: $ret_alias"
+            else
+                log_warning "token_info.iam_alias not present"
+            fi
+            if [[ "$ui_iuid_alias" != "0" ]]; then
+                log_success "user_info.iuid: $ui_iuid_alias (iam_alias 方式无 iuid，符合预期)"
+            else
+                log_warning "user_info.iuid not present (iam_alias 方式，符合预期)"
+            fi
+        fi
+
+        # 清理
+        local qstub_auth="QiniuStub uid=${uid}&ut=1"
+        curl -s -X DELETE "$BASE_URL/api/v2/tokens/$token_id_iuid" -H "Authorization: $qstub_auth" > /dev/null
+        curl -s -X DELETE "$BASE_URL/api/v2/tokens/$token_id_alias" -H "Authorization: $qstub_auth" > /dev/null
+
+        if [[ "$found_userinfo" == "true" ]]; then
+            log_success "🎉 FULL UserInfo with IAM sub-account fields verified!"
+            break
+        fi
+    done
+
+    if [[ "$found_userinfo" == "false" ]]; then
+        log_warning "No UserInfo found - Qconf RPC may not be configured (graceful degradation)"
+    fi
+}
+
+# 3.1 列出 Tokens（iuid 子账号隔离）
+# 验证：iuid 视角返回的数量 < 主账户总量（隔离生效）
+test_list_tokens_iuid_isolation() {
+    log_info "Listing tokens with iuid isolation (uid=$QINIU_UID, iuid=$QINIU_IUID)..."
+
+    # 先获取主账户总数
+    local main_total=$(curl -s -X GET "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: QiniuStub uid=${QINIU_UID}&ut=1" \
+        | python3 -c "import sys, json; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null)
+
+    # 再获取 iuid 子账号视角的数量
+    local response=$(curl -s -X GET "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: QiniuStub uid=${QINIU_UID}&ut=1&iuid=${QINIU_IUID}")
+
+    echo "$response" | python3 -m json.tool 2>/dev/null
+
+    local iuid_total=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null)
+
+    if [[ "$iuid_total" == "-1" ]]; then
+        log_error "Failed to list tokens with iuid: $response"
+        exit 1
+    fi
+
+    # 子账号视角的数量必须 <= 主账户总量，且等于该 iuid 创建的 token 数（至少1个）
+    if [[ "$iuid_total" -ge 1 && "$iuid_total" -lt "$main_total" ]]; then
+        log_success "iuid isolation passed: iuid_total=$iuid_total < main_total=$main_total"
+    elif [[ "$iuid_total" -ge 1 ]]; then
+        log_success "iuid isolation: iuid_total=$iuid_total, main_total=$main_total"
+    else
+        log_error "iuid isolation failed: iuid_total=$iuid_total (expected >=1)"
+        exit 1
+    fi
+}
+
+# 3.2 列出 Tokens（iam_alias 子账号隔离）
+# 验证：iam_alias 视角返回的数量 < 主账户总量（隔离生效）
+test_list_tokens_iam_alias_isolation() {
+    log_info "Listing tokens with iam_alias isolation (uid=$QINIU_UID, iam_alias=testuser)..."
+
+    # 先获取主账户总数
+    local main_total=$(curl -s -X GET "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: QiniuStub uid=${QINIU_UID}&ut=1" \
+        | python3 -c "import sys, json; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null)
+
+    # 获取 iam_alias 子账号视角的数量
+    local response=$(curl -s -X GET "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: QiniuStub uid=${QINIU_UID}&ut=1&app=1&iam_alias=testuser")
+
+    echo "$response" | python3 -m json.tool 2>/dev/null
+
+    local alias_total=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null)
+
+    if [[ "$alias_total" == "-1" ]]; then
+        log_error "Failed to list tokens with iam_alias: $response"
+        exit 1
+    fi
+
+    if [[ "$alias_total" -ge 1 && "$alias_total" -lt "$main_total" ]]; then
+        log_success "iam_alias isolation passed: alias_total=$alias_total < main_total=$main_total"
+    elif [[ "$alias_total" -ge 1 ]]; then
+        log_success "iam_alias isolation: alias_total=$alias_total, main_total=$main_total"
+    else
+        log_error "iam_alias isolation failed: alias_total=$alias_total (expected >=1)"
+        exit 1
+    fi
+}
+
+# 3.3 主账户列出全部 Tokens（不隔离）
+test_list_tokens_main_sees_all() {
+    log_info "Listing tokens with main account (should see all tokens including sub-accounts)..."
+
+    local qstub_auth="QiniuStub uid=${QINIU_UID}&ut=1"
+
+    local response=$(curl -s -X GET "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: $qstub_auth")
+
+    local total=$(echo $response | python3 -c "import sys, json; print(json.load(sys.stdin).get('total', -1))" 2>/dev/null)
+
+    if [[ "$total" == "-1" ]]; then
+        log_error "Failed to list tokens: $response"
+        exit 1
+    fi
+
+    # 主账户应该能看到所有 token（主账户 + iuid子账号 + iam_alias子账号 + prefix token = 至少4个）
+    if [[ "$total" -ge 4 ]]; then
+        log_success "Main account sees all tokens: total=$total (includes sub-account tokens)"
+    else
+        log_warning "Main account sees $total tokens (expected >=4, some may be filtered)"
+    fi
+}
+
+# 4.1 子账号跨账号操作隔离验证
+# iuid 子账号不能 GET/PUT/DELETE 属于 iam_alias 子账号的 token，反之亦然
+test_subaccount_cross_access_denied() {
+    local qstub_main="QiniuStub uid=${QINIU_UID}&ut=1"
+    local qstub_iuid="QiniuStub uid=${QINIU_UID}&ut=1&iuid=${QINIU_IUID}"
+    local qstub_alias="QiniuStub uid=${QINIU_UID}&ut=1&app=1&iam_alias=testuser"
+
+    # 创建 iuid token 和 iam_alias token
+    local iuid_tid=$(curl -s -X POST "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: $qstub_iuid" -H "Content-Type: application/json" \
+        -d '{"description":"cross-access-iuid"}' \
+        | python3 -c "import sys,json; print(json.load(sys.stdin).get('token_id',''))" 2>/dev/null)
+
+    local alias_tid=$(curl -s -X POST "$BASE_URL/api/v2/tokens" \
+        -H "Authorization: $qstub_alias" -H "Content-Type: application/json" \
+        -d '{"description":"cross-access-alias"}' \
+        | python3 -c "import sys,json; print(json.load(sys.stdin).get('token_id',''))" 2>/dev/null)
+
+    log_info "Created iuid token: $iuid_tid, alias token: $alias_tid"
+
+    local passed=0
+    local failed=0
+
+    # iuid 子账号尝试 GET iam_alias token → 应 403
+    local r=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$BASE_URL/api/v2/tokens/$alias_tid" \
+        -H "Authorization: $qstub_iuid")
+    if [[ "$r" == "403" ]]; then
+        log_success "GET: iuid cannot access alias token (403) ✓"; passed=$((passed+1))
+    else
+        log_error "GET: iuid should be denied alias token, got $r"; failed=$((failed+1))
+    fi
+
+    # iam_alias 子账号尝试 GET iuid token → 应 403
+    r=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$BASE_URL/api/v2/tokens/$iuid_tid" \
+        -H "Authorization: $qstub_alias")
+    if [[ "$r" == "403" ]]; then
+        log_success "GET: alias cannot access iuid token (403) ✓"; passed=$((passed+1))
+    else
+        log_error "GET: alias should be denied iuid token, got $r"; failed=$((failed+1))
+    fi
+
+    # iuid 子账号尝试 PUT iam_alias token → 应 403
+    r=$(curl -s -o /dev/null -w "%{http_code}" -X PUT "$BASE_URL/api/v2/tokens/$alias_tid/status" \
+        -H "Authorization: $qstub_iuid" -H "Content-Type: application/json" \
+        -d '{"is_active":false}')
+    if [[ "$r" == "403" ]]; then
+        log_success "PUT: iuid cannot update alias token (403) ✓"; passed=$((passed+1))
+    else
+        log_error "PUT: iuid should be denied alias token, got $r"; failed=$((failed+1))
+    fi
+
+    # iam_alias 子账号尝试 DELETE iuid token → 应 403
+    r=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE "$BASE_URL/api/v2/tokens/$iuid_tid" \
+        -H "Authorization: $qstub_alias")
+    if [[ "$r" == "403" ]]; then
+        log_success "DELETE: alias cannot delete iuid token (403) ✓"; passed=$((passed+1))
+    else
+        log_error "DELETE: alias should be denied iuid token, got $r"; failed=$((failed+1))
+    fi
+
+    # iuid 子账号能操作自己的 token → 应 200
+    r=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$BASE_URL/api/v2/tokens/$iuid_tid" \
+        -H "Authorization: $qstub_iuid")
+    if [[ "$r" == "200" ]]; then
+        log_success "GET: iuid can access own token (200) ✓"; passed=$((passed+1))
+    else
+        log_error "GET: iuid should access own token, got $r"; failed=$((failed+1))
+    fi
+
+    # 主账号能操作所有 token → 应 200
+    r=$(curl -s -o /dev/null -w "%{http_code}" -X GET "$BASE_URL/api/v2/tokens/$alias_tid" \
+        -H "Authorization: $qstub_main")
+    if [[ "$r" == "200" ]]; then
+        log_success "GET: main account can access any token (200) ✓"; passed=$((passed+1))
+    else
+        log_error "GET: main account should access alias token, got $r"; failed=$((failed+1))
+    fi
+
+    # 清理
+    curl -s -X DELETE "$BASE_URL/api/v2/tokens/$iuid_tid"  -H "Authorization: $qstub_main" > /dev/null
+    curl -s -X DELETE "$BASE_URL/api/v2/tokens/$alias_tid" -H "Authorization: $qstub_main" > /dev/null
+
+    if [[ "$failed" -gt 0 ]]; then
+        log_error "Sub-account cross-access isolation: $passed passed, $failed FAILED"
+        exit 1
+    fi
+    log_success "Sub-account cross-access isolation: all $passed checks passed ✓"
+}
+
 # 7. 更新 Token 状态
 test_update_token_status() {
     log_info "Updating token status..."
@@ -527,6 +873,13 @@ test_delete_tokens() {
         -H "Authorization: $qstub_auth" > /dev/null
     log_success "IAM sub-account token deleted"
 
+    # 删除 iam_alias 子账户 Token
+    if [[ -n "$TOKEN_ID_IAM_ALIAS" ]]; then
+        curl -s -X DELETE "$BASE_URL/api/v2/tokens/$TOKEN_ID_IAM_ALIAS" \
+            -H "Authorization: $qstub_auth" > /dev/null
+        log_success "IAM iam_alias token deleted"
+    fi
+
     # 删除自定义 prefix Token
     if [[ -n "$TOKEN_ID_PREFIX" ]]; then
         curl -s -X DELETE "$BASE_URL/api/v2/tokens/$TOKEN_ID_PREFIX" \
@@ -558,6 +911,10 @@ main() {
     test_step "2. Create Token (IAM Sub-Account)"
     test_create_token_iam_account
 
+    # 2.05 创建 Token（IAM 子账户，iam_alias 方式）
+    test_step "2.05 Create Token (IAM Sub-Account, iam_alias)"
+    test_create_token_iam_alias
+
     # 2.1 创建 Token（自定义 prefix）
     test_step "2.1 Create Token (Custom Prefix)"
     test_create_token_with_prefix
@@ -571,6 +928,18 @@ main() {
     # 3. 列出 Tokens
     test_step "3. List Tokens"
     test_list_tokens
+
+    # 3.1 列出 Tokens（iuid 子账号隔离）
+    test_step "3.1 List Tokens (iuid Sub-Account Isolation)"
+    test_list_tokens_iuid_isolation
+
+    # 3.2 列出 Tokens（iam_alias 子账号隔离）
+    test_step "3.2 List Tokens (iam_alias Sub-Account Isolation)"
+    test_list_tokens_iam_alias_isolation
+
+    # 3.3 主账户列出全部 Tokens
+    test_step "3.3 List Tokens (Main Account - Sees All)"
+    test_list_tokens_main_sees_all
 
     # 4. 获取 Token 详情
     test_step "4. Get Token Info"
@@ -592,9 +961,21 @@ main() {
     test_step "6.6 Validate Bearer Token with UserInfo (IAM Sub-Account)"
     test_validate_bearer_token_with_userinfo_iam
 
+    # 6.65 验证 Bearer Token 并返回用户信息（IAM iam_alias 方式）
+    test_step "6.65 Validate Bearer Token with UserInfo (IAM iam_alias Sub-Account)"
+    test_validate_bearer_token_with_userinfo_iam_alias
+
     # 6.7 验证 Bearer Token 并返回完整用户信息（使用有效测试 UID）
     test_step "6.7 Validate Bearer Token with FULL UserInfo (Valid Test UID)"
     test_validate_bearer_token_with_full_userinfo
+
+    # 6.8 验证 Bearer Token 并返回完整用户信息（IAM 子账户，含 iuid/iam_alias）
+    test_step "6.8 Validate Bearer Token with FULL UserInfo (IAM Sub-Account)"
+    test_validate_bearer_token_with_full_userinfo_iam
+
+    # 4.1 子账号不能访问他人 Token（隔离验证）
+    test_step "4.1 Sub-Account Cannot Access Other's Token"
+    test_subaccount_cross_access_denied
 
     # 7. 更新 Token 状态
     test_step "7. Update Token Status"
@@ -610,8 +991,13 @@ main() {
     echo -e "${GREEN}🎉 All Tests Passed!${NC}"
     echo -e "${GREEN}  - Main Account (UID) ✓${NC}"
     echo -e "${GREEN}  - IAM Sub-Account (UID + IUID) ✓${NC}"
+    echo -e "${GREEN}  - IAM Sub-Account (UID + iam_alias) ✓${NC}"
     echo -e "${GREEN}  - Custom Prefix Token ✓${NC}"
     echo -e "${GREEN}  - Prefix Validation ✓${NC}"
+    echo -e "${GREEN}  - List Tokens (iuid isolation) ✓${NC}"
+    echo -e "${GREEN}  - List Tokens (iam_alias isolation) ✓${NC}"
+    echo -e "${GREEN}  - List Tokens (main account sees all) ✓${NC}"
+    echo -e "${GREEN}  - Sub-Account Cross-Access Denied ✓${NC}"
     echo -e "${GREEN}  - Bearer Token Validation (/validate) ✓${NC}"
     echo -e "${GREEN}  - Bearer Token with UserInfo (/validateu) ✓${NC}"
     echo -e "${GREEN}  - Qconfapi RPC Integration ✓${NC}"

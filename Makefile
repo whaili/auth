@@ -3,7 +3,7 @@
 # ========================================
 # 简化的部署操作
 
-.PHONY: help compile build push test clean package
+.PHONY: help compile build push test clean package deploy-k8s-test
 
 # 默认目标
 .DEFAULT_GOAL := help
@@ -19,6 +19,8 @@ COLOR_ERROR   = \033[31m
 PROJECT_NAME = bearer-token-service
 VERSION ?= latest
 IMAGE_REPO ?= aslan-spock-register.qiniu.io/miku-stream/bearer-token-service
+IMAGE_TAG  ?= v2.0.0
+KUBECONFIG_TEST ?= _cust/kubeconfig-test
 GO = go
 HELM_CHART = deploy/helm/bearer-token-service
 
@@ -32,10 +34,13 @@ help: ## 显示帮助信息
 	@echo "$(COLOR_WARNING)注意: 所有部署操作已移至 deploy/scripts/deploy.sh$(COLOR_RESET)"
 	@echo ""
 	@echo "$(COLOR_SUCCESS)编译构建:$(COLOR_RESET)"
-	@echo "  $(COLOR_INFO)compile$(COLOR_RESET)    编译 Go 二进制文件"
-	@echo "  $(COLOR_INFO)build$(COLOR_RESET)      构建 Docker 镜像"
-	@echo "  $(COLOR_INFO)package$(COLOR_RESET)    打包部署文件"
-	@echo "  $(COLOR_INFO)push$(COLOR_RESET)       推送镜像到仓库"
+	@echo "  $(COLOR_INFO)compile$(COLOR_RESET)          编译 Go 二进制文件"
+	@echo "  $(COLOR_INFO)build$(COLOR_RESET)            构建 Docker 镜像"
+	@echo "  $(COLOR_INFO)package$(COLOR_RESET)          打包部署文件"
+	@echo "  $(COLOR_INFO)push$(COLOR_RESET)             推送镜像到仓库"
+	@echo ""
+	@echo "$(COLOR_SUCCESS)一键部署:$(COLOR_RESET)"
+	@echo "  $(COLOR_INFO)deploy-k8s-test$(COLOR_RESET)  编译+构建+推送+部署到 K8s 测试环境"
 	@echo ""
 	@echo "$(COLOR_SUCCESS)测试:$(COLOR_RESET)"
 	@echo "  $(COLOR_INFO)test$(COLOR_RESET)       运行所有测试"
@@ -68,9 +73,21 @@ build: compile ## 构建 Docker 镜像
 
 push: build ## 推送镜像到仓库
 	@echo "$(COLOR_INFO)推送镜像到仓库...$(COLOR_RESET)"
-	docker tag $(PROJECT_NAME):$(VERSION) $(IMAGE_REPO):$(VERSION)
-	docker push $(IMAGE_REPO):$(VERSION)
-	@echo "$(COLOR_SUCCESS)镜像推送完成: $(IMAGE_REPO):$(VERSION)$(COLOR_RESET)"
+	docker tag $(PROJECT_NAME):$(VERSION) $(IMAGE_REPO):$(IMAGE_TAG)
+	docker push $(IMAGE_REPO):$(IMAGE_TAG)
+	@echo "$(COLOR_SUCCESS)镜像推送完成: $(IMAGE_REPO):$(IMAGE_TAG)$(COLOR_RESET)"
+
+# ========================================
+# 一键部署
+# ========================================
+
+deploy-k8s-test: push ## 编译 + 构建 + 推送 + 部署到 K8s 测试环境
+	@echo "$(COLOR_INFO)部署到 K8s 测试环境...$(COLOR_RESET)"
+	KUBECONFIG=$(KUBECONFIG_TEST) helm upgrade --install bearer-token $(HELM_CHART) \
+		-f $(HELM_CHART)/values-test.yaml \
+		-n bearer-token-test
+	@echo "$(COLOR_SUCCESS)部署完成$(COLOR_RESET)"
+	@echo "$(COLOR_INFO)验证: curl http://bearer-token-test.jfcs-k8s-qa1.qiniu.io/health$(COLOR_RESET)"
 
 # ========================================
 # 测试

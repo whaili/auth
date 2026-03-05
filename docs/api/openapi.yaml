@@ -32,8 +32,10 @@ info:
   license:
     name: MIT
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8081
     description: 本地开发环境
+  - url: http://bearer-token-test.jfcs-k8s-qa1.qiniu.io
+    description: K8s 测试环境
   - url: http://bearer.qiniu.io
     description: 生产环境
 
@@ -44,6 +46,8 @@ tags:
     description: Bearer Token 的验证和权限检查
   - name: 健康检查
     description: 服务健康状态检查
+  - name: 监控
+    description: Prometheus 指标
 
 paths:
   /health:
@@ -63,6 +67,20 @@ paths:
                   status:
                     type: string
                     example: ok
+
+  /metrics:
+    get:
+      summary: Prometheus 指标
+      description: 暴露 Prometheus 格式的服务监控指标
+      tags:
+        - 监控
+      responses:
+        '200':
+          description: Prometheus 指标文本
+          content:
+            text/plain:
+              schema:
+                type: string
 
   /api/v2/tokens:
     post:
@@ -198,7 +216,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TokenSummary'
+                $ref: '#/components/schemas/TokenDetail'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -313,11 +331,25 @@ paths:
                   last_used_at:
                     type: string
                     format: date-time
+                    nullable: true
                     example: 2025-12-25T09:45:00Z
                   created_at:
                     type: string
                     format: date-time
                     example: 2025-12-25T10:00:00Z
+                  daily_stats:
+                    type: array
+                    description: 每日请求统计（未来扩展）
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          description: 日期（YYYY-MM-DD）
+                          example: "2026-03-01"
+                        requests:
+                          type: integer
+                          example: 1234
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -487,7 +519,7 @@ components:
         token:
           type: string
           description: 完整 token 值（仅在创建时返回，请妥善保存）
-          example: mk-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2
+          example: sk-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2
         account_id:
           type: string
           description: 账户 ID（格式为 qiniu_{uid}）
@@ -498,6 +530,7 @@ components:
         rate_limit:
           type: object
           description: API 频率限制配置
+          nullable: true
           properties:
             requests_per_minute:
               type: integer
@@ -516,10 +549,66 @@ components:
           type: string
           format: date-time
           description: 过期时间（null 表示永不过期）
+          nullable: true
           example: 2026-03-25T10:00:00Z
         is_active:
           type: boolean
           example: true
+
+    TokenDetail:
+      type: object
+      description: Token 详情（GET /api/v2/tokens/{id} 返回，含完整字段，隐藏 token 值）
+      properties:
+        token_id:
+          type: string
+          example: tk_9z8y7x6w5v4u
+        account_id:
+          type: string
+          description: 账户 ID（格式为 qiniu_{uid}）
+          example: qiniu_1234567
+        description:
+          type: string
+          example: Production token
+        iuid:
+          type: string
+          description: IAM 用户ID（创建时由 QiniuStub 认证中提取）
+          example: "8901234"
+        rate_limit:
+          type: object
+          description: API 频率限制配置
+          nullable: true
+          properties:
+            requests_per_minute:
+              type: integer
+              example: 1000
+            requests_per_hour:
+              type: integer
+              example: 10000
+            requests_per_day:
+              type: integer
+              example: 100000
+        created_at:
+          type: string
+          format: date-time
+          example: 2025-12-25T10:00:00Z
+        expires_at:
+          type: string
+          format: date-time
+          description: 过期时间（null 表示永不过期）
+          nullable: true
+          example: 2026-03-25T10:00:00Z
+        is_active:
+          type: boolean
+          example: true
+        total_requests:
+          type: integer
+          example: 12567
+        last_used_at:
+          type: string
+          format: date-time
+          description: 最后使用时间（null 表示从未使用）
+          nullable: true
+          example: 2025-12-25T09:45:00Z
 
     TokenSummary:
       type: object
