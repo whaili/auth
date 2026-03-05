@@ -39,8 +39,8 @@ qconf:
 
 # 测试环境配置
 config:
-  ginMode: "debug"
-  logLevel: "debug"
+  ginMode: "release"
+  logLevel: "warn"
   skipIndexCreation: "false"
   rateLimit:
     app: false

@@ -68,7 +68,7 @@ compile: ## 编译 Go 二进制文件
 
 build: compile ## 构建 Docker 镜像
 	@echo "$(COLOR_INFO)构建 Docker 镜像...$(COLOR_RESET)"
-	docker build -t $(PROJECT_NAME):$(VERSION) -f Dockerfile .
+	docker build --no-cache -t $(PROJECT_NAME):$(VERSION) -f Dockerfile .
 	@echo "$(COLOR_SUCCESS)镜像构建完成: $(PROJECT_NAME):$(VERSION)$(COLOR_RESET)"
 
 push: build ## 推送镜像到仓库
