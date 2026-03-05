@@ -6,7 +6,7 @@
 replicaCount: 1
 
 image:
-  repository: aslan-spock-register.qiniu.io/miku-stream/bearer-token-service
+  repository: registry-kubesphere-hd.qiniu.io/miku-stream/bearer-token-service
   tag: "v2.1.0"
   pullPolicy: Always
 
