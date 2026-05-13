@@ -41,6 +41,9 @@ func main() {
 	// ========================================
 	// 0. 初始化日志系统
 	// ========================================
+	// 先加载 YAML 配置文件作为环境变量默认值
+	config.LoadFromYAML(os.Getenv("CONFIG_FILE"))
+
 	logLevel := os.Getenv("LOG_LEVEL")
 	if logLevel == "" {
 		logLevel = "info"

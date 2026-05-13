@@ -68,3 +68,6 @@ tokenserv_test.log
 
 _cust
 bo-sdk-main/
+
+# sufy 运维配置（独立 GitLab 仓库管理）
+deploy/sufy/

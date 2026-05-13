@@ -8,7 +8,7 @@ replicaCount: 1
 # 测试环境镜像仓库
 image:
   repository: aslan-spock-register.qiniu.io/miku-stream/bearer-token-service
-  tag: "v2.1.0"
+  tag: "v2.2.0"
 
 # 启用内置 MongoDB
 mongodb:
